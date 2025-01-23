@@ -1,3 +1,4 @@
+## watchtower with email notifications. from https://containrrr.dev/watchtower/introduction/
 name: watchtower
 services:
     watchtower:
