@@ -1,0 +1,57 @@
+name: <your project name>
+services:
+    db:
+        image: mariadb:latest
+        container_name: nextcloud-db
+        restart: unless-stopped
+        volumes:
+            - type: bind
+              source: /mnt/your-pool/nextcloud-db
+              target: /var/lib/mysql
+        environment:
+            MYSQL_ROOT_PASSWORD: your_root_password
+            MYSQL_DATABASE: nextcloud
+            MYSQL_USER: nextcloud
+            MYSQL_PASSWORD: your_db_password
+    redis:
+        image: redis:latest
+        container_name: nextcloud-redis
+        restart: unless-stopped
+        command: redis-server --requirepass your_redis_password
+    nextcloud:
+        image: nextcloud:latest
+        container_name: nextcloud
+        restart: unless-stopped
+        ports:
+            - target: 80
+              published: "8080"
+              mode: ingress
+        volumes:
+            - type: bind
+              source: /mnt/your-pool/nextcloud-data
+              target: /var/www/html
+        environment:
+            MYSQL_HOST: db
+            MYSQL_DATABASE: nextcloud
+            MYSQL_USER: nextcloud
+            MYSQL_PASSWORD: your_db_password
+            REDIS_HOST: redis
+            REDIS_HOST_PASSWORD: your_redis_password
+    collabora:
+        image: collabora/code:latest
+        container_name: collabora
+        restart: unless-stopped
+        ports:
+            - target: 9980
+              published: "9980"
+              mode: ingress
+        environment:
+            - domain=nextcloud\\.yourdomain\\.com
+            - username=admin
+            - password=collabora_admin_password
+            - server_name=collabora
+        cap_add:
+            - MKNOD
+volumes:
+    nextcloud-data:
+    nextcloud-db-data:
