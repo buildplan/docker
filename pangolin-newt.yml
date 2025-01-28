@@ -1,0 +1,9 @@
+services:
+  newt:
+    image: fosrl/newt
+    container_name: newt
+    restart: unless-stopped
+    environment:
+      - PANGOLIN_ENDPOINT=https://example.com
+      - NEWT_ID=2ixxxxxx000xxx
+      - NEWT_SECRET=nnixxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx1234
