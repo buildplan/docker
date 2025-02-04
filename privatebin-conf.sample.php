@@ -5,7 +5,7 @@
 
 [main]
 ; (optional) set a project name to be displayed on the website
-name = "Ali's PasteBin"
+name = "my PasteBin"
 
 ; The full URL, with the domain name and directories that point to the
 ; PrivateBin files, including an ending slash (/). This URL is essential to
@@ -51,7 +51,7 @@ template = "bootstrap-dark-page"
 
 ; (optional) info text to display
 ; use single, instead of double quotes for HTML attributes
-info = "A temp sharing page from <a href='https://alisufyan.cloud' </a>."
+info = "A temp sharing page from <a href='https:/my.cloud' </a>."
 
 ; (optional) notice to display
 notice = "Note: This is a temporary service: Data may be deleted any time."
