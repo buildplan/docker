@@ -1,2 +1,2 @@
 ## docker
-A collection of docker compose.yml files
+A collection of docker compose.yml files and scripts. 
