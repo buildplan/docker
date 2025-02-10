@@ -1,0 +1,15 @@
+services:
+  fourget:
+    image: luuul/4get:latest
+    restart: unless-stopped
+    environment:
+      - FOURGET_PROTO=http
+      - FOURGET_SERVER_NAME=4get.mydomain.com
+      - FOURGET_BOT_PROTECTION=1
+
+    ports:
+      - "9080:80"
+
+    volumes:
+      - ./banners:/var/www/html/4get/banner
+      - ./captcha:/var/www/html/4get/data/captcha
