@@ -1,0 +1,231 @@
+:root {
+  --min-item-width: 28ch;
+  --max-item-width: .5fr;
+  --grid-spacing: .25rem;
+  --item-padding: .5rem; /* Increased padding for terminal feel */
+}
+
+/* Base styles for terminal look */
+body {
+  font-family: monospace, monospace; /* Monospace font for terminal look */
+  background-color: #000; /* Black background */
+  color: #00ff00; /* Green text */
+}
+
+/* Links in terminal style */
+a {
+    color: #00ff00; /* Green links */
+    text-decoration: none; /* No underlines for a cleaner terminal look */
+}
+
+a:hover {
+    text-decoration: underline; /* Underline on hover for link interaction */
+    color: #00bb00; /* Slightly darker green on hover */
+}
+
+
+/* Scrollbar styling for Webkit browsers (Chrome, Safari) */
+::-webkit-scrollbar {
+    width: 12px; /* Adjust scrollbar width */
+    background-color: #1e1e1e; /* Dark scrollbar background */
+}
+
+::-webkit-scrollbar-thumb {
+    background-color: #00aa00; /* Green scrollbar thumb color */
+    border-radius: 0px; /* Square corners for terminal style */
+    border: 2px solid #1e1e1e; /* Add border to thumb to visually separate */
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background-color: #00cc00; /* Slightly lighter green on hover */
+}
+
+/* Scrollbar styling for Firefox */
+/* Note: Firefox scrollbar styling is more limited */
+/* You might need to experiment with browser specific addons for more control in Firefox */
+/* For basic color change in Firefox, you can use the 'scrollbar-color' property */
+html {
+  scrollbar-color: #00aa00 #1e1e1e; /* thumb-color track-color */
+}
+
+
+/* Let items expand on small screens - unchanged */
+@media (max-width: 600px) {
+  :root {
+    --max-item-width: 1fr;
+  }
+}
+
+/* Cap item width for better appearance on large screens - unchanged */
+@media (min-width: 2560px) {
+  :root {
+    --max-item-width: 300px;
+  }
+}
+
+/* Readability on 4K screens at distance - adjusted for green text and terminal look */
+@media (min-width: 3840px) {
+  .item-name {
+    font-size: 1.3em;
+    font-weight: normal; /* Removed bold for a more classic terminal look */
+    letter-spacing: 0px; /* Reset letter spacing, terminals are usually tightly spaced */
+    color: #00ff00; /* Ensure green color */
+  }
+  .badge {
+    font-size: .9em;
+    color: #00ee00; /* Slightly different green for badges */
+    background-color: #222; /* Darker badge background */
+    border: 1px solid #00aa00; /* Green border for badges */
+  }
+  .wrap > .d-flex {
+    font-size: .9em;
+    font-weight: normal; /* Removed bold */
+    letter-spacing: 0px; /* Reset letter spacing */
+    color: #00dd00; /* Slightly different green for wrap text */
+  }
+}
+
+/* Expand container - unchanged */
+.container {
+  max-width: 98%
+}
+
+/* Grid layout - unchanged */
+.monitor-list > .monitor-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--min-item-width), var(--max-item-width)));
+  grid-gap: var(--grid-spacing);
+}
+
+/* Item styling - Terminal like borders and background */
+.item {
+  width: 100%;
+  padding: var(--item-padding) !important;
+  border: #00aa00 solid 2px; /* Green border for items */
+  background-color: #111; /* Darker background for items */
+  border-radius: 0px; /* No rounded corners for terminal look */
+}
+
+.item > .row {
+  flex-direction: column;
+}
+
+.row > div {
+  width: 100%;
+}
+
+/* Text readability - already green from body and 4K section, keep specific if needed */
+.item-name {
+  color: #00ff00; /* Green text for item names - ensure it */
+}
+
+/* Badge movement - adjusted badge look to fit terminal style */
+.badge {
+  background-color: #222; /* Darker background for badge */
+  color: #00ee00; /* Green color for badge text */
+  border: 1px solid #00aa00; /* Green border for badge */
+  border-radius: 0px; /* Square badges */
+  padding: .2em .5em; /* Adjust padding */
+  font-weight: normal; /* Remove bold from badges */
+}
+
+
+.row {
+  position: relative;
+}
+body:not(.mobile) .badge {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+/* Header compacting - adjusted overall status badge */
+.main {
+  position: relative;
+}
+.overall-status {
+  padding: .5rem !important;
+  background-color: #111; /* Match item background */
+  color: #00ff00; /* Green text */
+  border: 1px solid #00aa00; /* Green border */
+  border-radius: 0px; /* Square corners */
+}
+body:not(.mobile) .overall-status {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 50%;
+}
+
+/* Tweaks for mobile size - unchanged */
+body.mobile {}
+
+/* Footer compacting - adjusted footer text color */
+footer {
+    color: #00bb00; /* Green footer text */
+}
+
+footer .alert-heading {
+  padding: 0 !important;
+  color: inherit; /* Inherit green color */
+}
+
+/* Margin resets - unchanged */
+.mb-4, .mb-5 {
+  margin-bottom: .5rem !important;
+}
+
+.mt-4 {
+  margin-top: .5rem !important;
+}
+
+.mt-5 {
+  margin-top: 0 !important;
+}
+
+
+/* Reduce glaring blue maintenance color - adjusted to a green tone maintenance color */
+.bg-maintenance {
+  background-color: #003366 !important; /* Darker blue-green for maintenance */
+  color: #00ff00 !important; /* Green text on maintenance */
+}
+.bg-maintenance * { /* Ensure text within maintenance blocks is also green */
+    color: #00ff00 !important;
+}
+
+/* Alert colors - adjusted to terminal like colors */
+.alert-primary {
+    background-color: #1a1a1a !important;
+    border-color: #007700 !important;
+    color: #00ff00 !important;
+}
+.alert-secondary {
+    background-color: #202020 !important;
+    border-color: #008800 !important;
+    color: #00ee00 !important;
+}
+.alert-success {
+    background-color: #2a2a2a !important;
+    border-color: #009900 !important;
+    color: #00ff00 !important;
+}
+.alert-info {
+    background-color: #303030 !important;
+    border-color: #00aa00 !important;
+    color: #00dd00 !important;
+}
+.alert-warning {
+    background-color: #3a3a3a !important;
+    border-color: #ccaa00 !important; /* Yellowish border for warning */
+    color: #ffff00 !important; /* Yellow text for warning */
+}
+.alert-danger {
+    background-color: #404040 !important;
+    border-color: #aa0000 !important; /* Reddish border for danger */
+    color: #ff0000 !important; /* Red text for danger */
+}
+
+.alert-link {
+    color: #00ff00 !important; /* Green link color in alerts */
+}
