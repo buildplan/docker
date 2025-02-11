@@ -1,0 +1,202 @@
+/* Base Theme Settings - Terminal Theme Color Palette */
+:root {
+    --terminal-green: #3bff0b;
+    --terminal-bg: #030303;
+    --terminal-dark: #0c0c0c;
+    --terminal-hover: #111111;
+    --status-up: #22c55e;
+    --status-down: #ef4444;
+    --status-warning: #f59e0b;
+    --status-pending: #64748b;
+    --shimmer-color: rgba(255, 255, 255, 0.05); /* Subtle white shimmer */
+}
+
+/* Base Styles */
+/* Targetting body styles more specifically within the context of your status page elements */
+body.dark, /* For dark mode if uptime-kuma uses body.dark */
+body { /* General body styles - apply carefully, might be too broad depending on Uptime-Kuma structure */
+    background-color: var(--terminal-bg);
+    color: var(--terminal-green);
+    font-family: var(--bs-font-monospace);
+    text-shadow: 0 0 2px rgba(51, 255, 0, 0.3);
+    margin: 0;
+    padding: 20px;
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
+    line-height: var(--bs-body-line-height);
+    text-align: var(--bs-body-text-align);
+    /* Shimmering Background */
+    background-image: linear-gradient(to right, var(--terminal-bg) 0%, var(--shimmer-color) 50%, var(--terminal-bg) 100%);
+    background-size: 200% 100%; /* Make gradient wider than container */
+    animation: shimmerBackground 15s linear infinite; /* Apply shimmer animation */
+}
+
+/* Keyframes for Shimmer Animation */
+@keyframes shimmerBackground {
+    0% { background-position: 100% 0; } /* Start: Gradient fully on the right */
+    100% { background-position: -100% 0; } /* End: Gradient fully on the left */
+}
+
+
+/* Monitor Cards - Box Styling (No changes from previous boxed version) */
+.monitor-list {
+    border: 1px solid var(--terminal-green);
+    background: var(--terminal-dark);
+    margin: 10px 0;
+    padding: 10px;
+    border-radius: 5px;
+}
+
+.monitor-card {
+    margin-bottom: 10px;
+    background-color: var(--terminal-dark);
+    border: 1px solid var(--terminal-green);
+    border-radius: 5px;
+    padding: 15px;
+    transition: all 0.2s ease;
+    box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.3);
+}
+
+.monitor-card:hover, .item:hover {
+    background: var(--terminal-hover);
+    box-shadow: inset 0 0 10px rgba(51, 255, 0, 0.1), 2px 2px 5px rgba(0, 0, 0, 0.3);
+}
+
+.monitor-card:last-child, .item:last-child {
+    border-bottom: none;
+}
+
+/* Status Badges (No changes) */
+.status-badge {
+    font-family: var(--bs-font-monospace);
+    background-color: transparent;
+    padding: 5px 10px;
+    margin-right: 10px;
+    border: none;
+}
+
+.status-badge.status-up {
+    border: 1px solid var(--status-up);
+    color: var(--status-up);
+}
+
+.status-badge.status-down {
+    border: 1px solid var(--status-down);
+    color: var(--status-down);
+}
+
+.status-badge.status-maintenance {
+    border: 1px solid var(--status-warning);
+    color: var(--status-warning);
+}
+
+.status-badge.status-pending {
+    border: 1px solid var(--status-pending);
+    color: var(--status-pending);
+}
+
+/* Heartbeat Monitor Colors (No changes) */
+.beat-up {
+    background-color: var(--status-up);
+    box-shadow: 0 0 5px var(--status-up);
+}
+
+.beat-down {
+    background-color: var(--status-down);
+    box-shadow: 0 0 5px var(--status-down);
+}
+
+.beat-maintenance {
+    background-color: var(--status-warning);
+    box-shadow: 0 0 5px var(--status-warning);
+}
+
+.beat-pending {
+    background-color: var(--status-pending);
+    box-shadow: 0 0 5px var(--status-pending);
+}
+
+/* Status Check Icons (No changes) */
+.svg-inline--fa.fa-check-circle.ok {
+    color: var(--status-up);
+    filter: drop-shadow(0 0 2px rgba(34, 197, 94, 0.3));
+}
+
+.svg-inline--fa.fa-times-circle.down {
+    color: var(--status-down);
+    filter: drop-shadow(0 0 2px rgba(239, 68, 68, 0.3));
+}
+
+.svg-inline--fa.fa-exclamation-circle.maintenance {
+    color: var(--status-warning);
+    filter: drop-shadow(0 0 2px rgba(245, 158, 11, 0.3));
+}
+
+/* Interactive Elements - Renamed button classes (No changes) */
+.status-btn,
+.status-btn-primary,
+.status-btn-add-group {
+    background-color: transparent;
+    border: 1px solid var(--terminal-green);
+    color: var(--terminal-green);
+    font-family: var(--bs-font-monospace);
+    transition: all 0.2s ease;
+}
+
+.status-btn:hover,
+.status-btn-primary:hover,
+.status-btn-add-group:hover {
+    background-color: var(--terminal-green);
+    color: var(--terminal-bg);
+}
+
+/* Button Icons - Renamed button classes (No changes) */
+.status-btn svg,
+.status-btn-primary svg,
+.status-btn-add-group svg {
+    color: var(--terminal-green);
+}
+
+.status-btn:hover svg,
+.status-btn-primary:hover svg,
+.status-btn-add-group:hover svg {
+    color: var(--terminal-bg);
+}
+
+/* Terminal Effects - Blinking cursor and CRT scan commented out for accessibility */
+/* @keyframes blink { ... } */
+/* .monitor-card::after { ... } */
+/* .container::before { ... } */
+/* @keyframes scan { ... } */
+
+/* Custom Scrollbar (No changes) */
+::-webkit-scrollbar {
+    width: 10px;
+    background-color: var(--terminal-bg);
+}
+
+::-webkit-scrollbar-thumb, .dark::-webkit-scrollbar-thumb {
+    background-color: var(--terminal-green);
+    border: 1px solid var(--terminal-green);
+    border-radius: 20px;
+}
+
+/* Footer (No changes) */
+footer {
+    border-top: 1px solid rgba(51, 255, 0, 0.3);
+    margin-top: 30px;
+    padding-top: 20px;
+    font-size: 0.9em;
+    color: rgba(51, 255, 0, 0.8);
+}
+
+/* Links (No changes) */
+a {
+    color: var(--terminal-green);
+    text-decoration: none;
+    border-bottom: 1px solid rgba(51, 255, 0, 0.3);
+}
+
+a:hover {
+    border-bottom-color: var(--terminal-green);
+}
