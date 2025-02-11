@@ -1,0 +1,200 @@
+/* Base Theme Settings */
+:root {
+    --terminal-green: #33ff00;
+    --terminal-bg: #0a0a0a;
+    --terminal-dark: #0c0c0c;
+    --terminal-hover: #111111;
+    --status-up: #22c55e;        /* Standard green for "up" status */
+    --status-down: #ef4444;      /* Standard red for "down" status */
+    --status-warning: #f59e0b;   /* Standard yellow for warnings/maintenance */
+    --status-pending: #64748b;   /* Standard grey for pending/unknown */
+}
+
+/* Base Styles */
+body, body.dark {
+    background-color: var(--terminal-bg) !important;
+    color: var(--terminal-green) !important;
+    font-family: var(--bs-font-monospace) !important;
+    text-shadow: 0 0 2px rgba(51, 255, 0, 0.3);
+    margin: 0;
+    padding: 20px;
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
+    line-height: var(--bs-body-line-height);
+    text-align: var(--bs-body-text-align);
+}
+
+/* Monitor Cards */
+.monitor-list {
+    border: 1px solid var(--terminal-green);
+    background: var(--terminal-dark);
+    margin: 10px 0;
+}
+
+.monitor-card, .item {
+    border-bottom: 1px solid rgba(51, 255, 0, 0.2);
+    padding: 15px;
+    transition: all 0.2s ease;
+}
+
+.monitor-card:hover, .item:hover {
+    background: var(--terminal-hover);
+    box-shadow: inset 0 0 10px rgba(51, 255, 0, 0.1);
+}
+
+/* Status Badges */
+.badge {
+    font-family: var(--bs-font-monospace);
+    background: transparent !important;
+    padding: 5px 10px;
+    margin-right: 10px;
+}
+
+/* Status Colors for Badges */
+.badge-up, .bg-primary {
+    border: 1px solid var(--status-up) !important;
+    color: var(--status-up) !important;
+}
+
+.badge-down, .bg-danger {
+    border: 1px solid var(--status-down) !important;
+    color: var(--status-down) !important;
+}
+
+.badge-maintenance, .bg-warning {
+    border: 1px solid var(--status-warning) !important;
+    color: var(--status-warning) !important;
+}
+
+.badge-pending, .bg-secondary {
+    border: 1px solid var(--status-pending) !important;
+    color: var(--status-pending) !important;
+}
+
+/* Heartbeat Monitor Colors */
+.beat-up {
+    background: var(--status-up) !important;
+    box-shadow: 0 0 5px var(--status-up) !important;
+}
+
+.beat-down {
+    background: var(--status-down) !important;
+    box-shadow: 0 0 5px var(--status-down) !important;
+}
+
+.beat-maintenance {
+    background: var(--status-warning) !important;
+    box-shadow: 0 0 5px var(--status-warning) !important;
+}
+
+.beat-pending {
+    background: var(--status-pending) !important;
+    box-shadow: 0 0 5px var(--status-pending) !important;
+}
+
+/* Status Check Icons */
+.svg-inline--fa.fa-check-circle.ok {
+    color: var(--status-up) !important;
+    filter: drop-shadow(0 0 2px rgba(34, 197, 94, 0.3));
+}
+
+.svg-inline--fa.fa-times-circle.down {
+    color: var(--status-down) !important;
+    filter: drop-shadow(0 0 2px rgba(239, 68, 68, 0.3));
+}
+
+.svg-inline--fa.fa-exclamation-circle.maintenance {
+    color: var(--status-warning) !important;
+    filter: drop-shadow(0 0 2px rgba(245, 158, 11, 0.3));
+}
+
+/* Interactive Elements */
+.btn, .btn-primary, .btn-add-group {
+    background: transparent !important;
+    border: 1px solid var(--terminal-green) !important;
+    color: var(--terminal-green) !important;
+    font-family: var(--bs-font-monospace);
+    transition: all 0.2s ease;
+}
+
+.btn:hover, .btn-primary:hover, .btn-add-group:hover {
+    background: var(--terminal-green) !important;
+    color: var(--terminal-bg) !important;
+}
+
+/* Button Icons */
+.btn svg, .btn-primary svg, .btn-add-group svg {
+    color: var(--terminal-green) !important;
+}
+
+.btn:hover svg, .btn-primary:hover svg, .btn-add-group:hover svg {
+    color: var(--terminal-bg) !important;
+}
+
+/* Terminal Effects */
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+}
+
+.monitor-card::after {
+    content: '_';
+    animation: blink 1s step-end infinite;
+    margin-left: 5px;
+}
+
+/* CRT Scan Effect */
+.container::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(
+        rgba(51, 255, 0, 0.03),
+        rgba(51, 255, 0, 0.03) 50%,
+        transparent 50%,
+        transparent
+    );
+    background-size: 100% 4px;
+    pointer-events: none;
+    animation: scan 10s linear infinite;
+}
+
+@keyframes scan {
+    from { transform: translateY(-50%); }
+    to { transform: translateY(50%); }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+    width: 10px !important;
+    background: var(--terminal-bg) !important;
+}
+
+::-webkit-scrollbar-thumb, .dark::-webkit-scrollbar-thumb {
+    background: var(--terminal-green) !important;
+    border: 1px solid var(--terminal-green) !important;
+    border-radius: 20px;
+}
+
+/* Footer */
+footer {
+    border-top: 1px solid rgba(51, 255, 0, 0.3);
+    margin-top: 30px;
+    padding-top: 20px;
+    font-size: 0.9em;
+    color: rgba(51, 255, 0, 0.8);
+}
+
+/* Links */
+a {
+    color: var(--terminal-green);
+    text-decoration: none;
+    border-bottom: 1px solid rgba(51, 255, 0, 0.3);
+}
+
+a:hover {
+    border-bottom-color: var(--terminal-green);
+}
