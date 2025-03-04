@@ -1,0 +1,11 @@
+services:
+  nexterm:
+    ports:
+      - "127.0.0.1:6989:6989" # bind to localhost 
+      - "100.10.10.10:6989:6989" # bind to specific local ip
+    restart: always
+    volumes:
+      - nexterm:/app/data
+    image: germannewsmaker/nexterm:1.0.2-OPEN-PREVIEW
+volumes:
+  nexterm:
