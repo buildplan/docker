@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Replace with your repository's raw URL for the main script
-MAIN_SCRIPT_URL="https://raw.githubusercontent.com/buildplan/docker/refs/heads/main/Pangolin/main.sh"
+MAIN_SCRIPT_URL="https://raw.githubusercontent.com/buildplan/docker/refs/heads/main/Pangolin/monitor/main.sh"
 
 # Replace with your repository's raw URL for the dependent script
 DEPENDENT_SCRIPT_URL="https://raw.githubusercontent.com/buildplan/docker/refs/heads/main/Pangolin/discord.sh"
