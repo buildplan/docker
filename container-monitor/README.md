@@ -9,6 +9,11 @@
 ### Get this script 
 
 `curl -o docker-container-monitor.sh https://raw.githubusercontent.com/buildplan/docker/refs/heads/main/container-monitor/docker-container-monitor.sh`
+`curl -o config.sh https://raw.githubusercontent.com/buildplan/docker/refs/heads/main/container-monitor/config.sh`
+
+#### Make Executable
+
+`chmod +x docker-container-monitor.sh config.sh`
 
 ### How to Configure and Run:
 
