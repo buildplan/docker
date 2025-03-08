@@ -94,7 +94,6 @@ print_message() {
   fi
 }
 
-
 check_container_status() {
   local container_name="$1"
   local status=$(docker inspect -f '{{.State.Status}}' "$container_name" 2>/dev/null)
@@ -120,14 +119,17 @@ check_container_status() {
   else
     if [ "$health_status" = "healthy" ]; then
       print_message "  Status: Running and healthy (Status: $status, Health: $health_status, CPU: $cpu_percent, Mem: $mem_percent)" "GOOD"
+      return 0
     elif [ "$health_status" = "unhealthy" ]; then
       print_message "  Status: Running but UNHEALTHY (Status: $status, Health: $health_status, CPU: $cpu_percent, Mem: $mem_percent)" "DANGER"
       detailed_health=$(docker inspect -f '{{json .State.Health}}' "$container_name" 2>/dev/null)
       if [ -n "$detailed_health" ]; then
         print_message "    Detailed Health Info: $detailed_health" "WARNING" # More details in warning color
       fi
+      return 1
     else
       print_message "  Status: Running (Status: $status, Health: $health_status, CPU: $cpu_percent, Mem: $mem_percent)" "WARNING"
+      return 1
     fi
   fi
 }
@@ -170,8 +172,10 @@ check_for_updates() {
 
     if [ "$remote_digest" != "$local_digest" ]; then
       print_message "  Update Check: Update available!\n    Current: $local_digest\n    New: $remote_digest" "WARNING"
+      return 1
     else
       print_message "  Update Check: No updates available. Current digest is up-to-date." "GOOD"
+      return 0
     fi
 }
 
@@ -194,8 +198,10 @@ check_logs() {
 
   if echo "$logs" | grep -i -E 'error|warning' >/dev/null; then
     print_message "  Log Check: Errors/Warnings found in logs." "WARNING"
+    return 1
   else
       print_message "  Log Check: No errors or warnings found in last $LOG_LINES_TO_CHECK log lines." "GOOD"
+      return 0
   fi
 }
 
@@ -241,7 +247,6 @@ else # No arguments, monitor containers from config file or all running if confi
   fi
 fi
 
-
 if [ "$#" -eq 0 ] || [ "$1" != "logs" ]; then # Run full monitoring unless only 'logs' is specified
   if [ -z "$CONTAINERS_TO_CHECK" ] && [ "$#" -eq 0 ]; then
       print_message "No running containers found to monitor." "INFO"
@@ -251,14 +256,24 @@ if [ "$#" -eq 0 ] || [ "$1" != "logs" ]; then # Run full monitoring unless only 
       print_message "Container: ${container_name}" "INFO"
       check_container_status "$container_name"
       status_check_result=$? # Capture exit status of check_container_status
+      if [ $status_check_result -ne 0 ]; then
+        echo "Debug: check_container_status exit status = $status_check_result" # Debug statement
+      fi
       check_for_updates "$container_name"
       update_check_result=$? # Capture exit status of check_for_updates
+      if [ $update_check_result -ne 0 ]; then
+        echo "Debug: check_for_updates exit status = $update_check_result" # Debug statement
+      fi
       check_logs "$container_name"
       log_check_result=$? # Capture exit status of check_logs
+      if [ $log_check_result -ne 0 ]; then
+        echo "Debug: check_logs exit status = $log_check_result" # Debug statement
+      fi
 
       # Check if any of the checks for this container resulted in a warning or error (non-zero exit code)
       if [ $status_check_result -ne 0 ] || [ $update_check_result -ne 0 ] || [ $log_check_result -ne 0 ]; then
         WARNING_OR_ERROR_CONTAINERS+=("$container_name") # Add container name to warning/error list
+        echo "Debug: Added $container_name to WARNING_OR_ERROR_CONTAINERS" # Debug statement
       fi
 
       echo "-------------------------------------------------------------------------" # Separator after each container's check
@@ -293,7 +308,6 @@ if [ -n "$LOG_FILE" ]; then
     fi
   fi
 fi
-
 
 print_message "Docker monitoring script completed." "INFO"
 exit 0
