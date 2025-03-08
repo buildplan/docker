@@ -1,3 +1,5 @@
+## A simple script to monitor docker resources, logs and check for new images/updates. 
+
 ### Prerequisites:
   - Docker
   - jq (for processing JSON output from docker inspect and docker stats)
