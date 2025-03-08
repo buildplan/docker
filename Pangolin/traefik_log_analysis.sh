@@ -25,7 +25,7 @@ parse_logs() {
     local format=$(detect_format)
     
     if [[ "$format" == "json" ]]; then
-        jq -r '[.ClientHost, .RequestMethod, .RequestPath, .DownstreamStatus, (.["request_User-Agent"] // ""), .["request_X-Forwarded-Prot>
+        jq -r '[.ClientHost, .RequestMethod, .RequestPath, .DownstreamStatus, (.["request_User-Agent"] // ""), .["request_X-Forwarded-Proto"], .TLSVersion] | join("\t")' "$log_file" | head -n "$max_lines" > "$temp_file"
     else
         awk '{print $1 "\t" $6 "\t" $7 "\t" $9 "\t" $14 "\t" "http" "\t" ""}' "$log_file" | head -n "$max_lines" > "$temp_file"
     fi
@@ -116,17 +116,18 @@ analyze_errors() {
     local input_file=$1
     local filtered_file=$(filter_ips "$input_file")
     echo "Error Analysis (Status >= 400):"
-    awk -F'\t' '$4 >= 400 {print $4 "\t" $1 "\t" $3}' "$filtered_file" | sort | uniq -c | sort -nr | head -10 | while read -r count status>
+    awk -F'\t' '$4 >= 400 {print $4 "\t" $1 "\t" $3}' "$filtered_file" | sort | uniq -c | sort -nr | head -10 | while read -r count status ip path; do
         echo "  $status from $ip on $path: $count times"
     done
     if $save_report; then
         echo "status,ip,path,count" > "$report_dir/errors.csv"
-        awk -F'\t' '$4 >= 400 {print $4 "\t" $1 "\t" $3}' "$filtered_file" | sort | uniq -c | sort -nr | head -10 | while read -r count st>
+        awk -F'\t' '$4 >= 400 {print $4 "\t" $1 "\t" $3}' "$filtered_file" | sort | uniq -c | sort -nr | head -10 | while read -r count status ip path; do
             echo "$status,$ip,$path,$count" >> "$report_dir/errors.csv"
         done
     fi
     rm "$filtered_file"
 }
+
 analyze_tls() {
     local input_file=$1
     local filtered_file=$(filter_ips "$input_file")
@@ -142,6 +143,7 @@ analyze_tls() {
     fi
     rm "$filtered_file"
 }
+
 analyze_user_agents() {
     local input_file=$1
     local filtered_file=$(filter_ips "$input_file")
@@ -157,21 +159,23 @@ analyze_user_agents() {
     fi
     rm "$filtered_file"
 }
+
 analyze_security() {
     local input_file=$1
     local filtered_file=$(filter_ips "$input_file")
     echo "Security Analysis - Suspicious Paths:"
-    awk -F'\t' '$3 ~ /\.(git|env|sql|bak)$|wp-|admin|login|phpMyAdmin|actuator|shell|passwd|eval|xmlrpc/ {print $1 "\t" $3}' "$filtered_fi>
+    awk -F'\t' '$3 ~ /\.(git|env|sql|bak)$|wp-|admin|login|phpMyAdmin|actuator|shell|passwd|eval|xmlrpc/ {print $1 "\t" $3}' "$filtered_file" | sort | uniq -c | sort -nr | head -10 | while read -r count ip path; do
         echo "  $ip requested $path: $count times"
     done
     if $save_report; then
         echo "ip,path,count" > "$report_dir/suspicious_paths.csv"
-        awk -F'\t' '$3 ~ /\.(git|env|sql|bak)$|wp-|admin|login|phpMyAdmin|actuator|shell|passwd|eval|xmlrpc/ {print $1 "\t" $3}' "$filtere>
+        awk -F'\t' '$3 ~ /\.(git|env|sql|bak)$|wp-|admin|login|phpMyAdmin|actuator|shell|passwd|eval|xmlrpc/ {print $1 "\t" $3}' "$filtered_file" | sort | uniq -c | sort -nr | head -10 | while read -r count ip path; do
             echo "$ip,$path,$count" >> "$report_dir/suspicious_paths.csv"
         done
     fi
     rm "$filtered_file"
 }
+
 # Settings menu
 settings() {
     while true; do
@@ -224,6 +228,7 @@ main() {
     max_lines=${input_lines:-5000}
 
     parsed_file=$(parse_logs)
+
     while true; do
         echo -e "\nMenu:"
         echo "1. Analyze HTTP Status Codes"
@@ -261,5 +266,3 @@ main() {
 
 # Run the script
 main
-
-
