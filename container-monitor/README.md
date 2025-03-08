@@ -16,6 +16,12 @@
 
 `chmod +x docker-container-monitor.sh config.sh`
 
+#### Get the docker container name 
+
+`docker ps -a --format '{{.Names}}'`
+
+Add the names in config `nano config.sh`
+
 ### How to Configure and Run:
 
 Configuration via `config.sh` (for defaults): Edit `config.sh` to set default values for `LOG_LINES_TO_CHECK`, `CHECK_FREQUENCY_MINUTES`, `LOG_FILE`, and the `CONTAINER_NAMES_DEFAULT` array.
