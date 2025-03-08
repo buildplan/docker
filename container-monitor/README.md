@@ -46,4 +46,4 @@ export CONTAINER_NAMES="nginx,app-container"
 
 `./docker-container-monitor.sh logs <container_name>`: Shows logs for a specific container.
 
-Check the log file: Output is logged to the file specified by LOG_FILE (default docker-monitor.log).
+Check the log file: Output is logged to the file specified by `LOG_FILE` (default `docker-monitor.log`).
