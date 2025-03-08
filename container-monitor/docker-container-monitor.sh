@@ -104,9 +104,9 @@ check_container_status() {
   fi
 
   local health_status="not configured"
-   if docker inspect "$container_name" | jq -e '.State.Health' >/dev/null 2>&1; then
-        health_status=$(docker inspect -f '{{.State.Health.Status}}' "$container_name")
-   fi
+  if docker inspect "$container_name" | jq -e '.State.Health' >/dev/null 2>&1; then
+    health_status=$(docker inspect -f '{{.State.Health.Status}}' "$container_name")
+  fi
 
   # --- Corrected CPU and Memory retrieval using .CPU and .MemPerc ---
   local cpu_percent=$(docker stats --no-stream --format '{{.CPU}}' "$container_name" 2>/dev/null)
@@ -127,6 +127,9 @@ check_container_status() {
         print_message "    Detailed Health Info: $detailed_health" "WARNING" # More details in warning color
       fi
       return 1
+    elif [ "$health_status" = "not configured" ]; then
+      print_message "  Status: Running (Status: $status, Health: $health_status, CPU: $cpu_percent, Mem: $mem_percent)" "GOOD"
+      return 0
     else
       print_message "  Status: Running (Status: $status, Health: $health_status, CPU: $cpu_percent, Mem: $mem_percent)" "WARNING"
       return 1
