@@ -4,7 +4,7 @@
 MAIN_SCRIPT_URL="https://raw.githubusercontent.com/buildplan/docker/refs/heads/main/Pangolin/monitor/main.sh"
 
 # Replace with your repository's raw URL for the dependent script
-DEPENDENT_SCRIPT_URL="https://raw.githubusercontent.com/buildplan/docker/refs/heads/main/Pangolin/discord.sh"
+DEPENDENT_SCRIPT_URL="https://raw.githubusercontent.com/buildplan/docker/refs/heads/main/Pangolin/monitor/discord.sh"
 
 # Replace with the desired filenames (optional, you can keep them the same as in the repo)
 MAIN_SCRIPT_FILENAME="main.sh"
