@@ -3,28 +3,42 @@
 # Description:
 # This script monitors Docker containers on the system.
 # It checks container status, resource usage (CPU, Memory),
-# checks for image updates, and checks container logs.
+# checks for image updates, and checks container logs for errors/warnings.
 # Output is printed to the standard output with improved formatting and colors and logged to a file.
 #
+# Configuration:
+#   Configuration is primarily done via environment variables.
+#   See config.sh for default values and environment variable names.
+#   Environment variables override settings in config.sh.
+#
+# Environment Variables (can be set to customize script behavior):
+#   - LOG_LINES_TO_CHECK: Number of log lines to check (default: 20)
+#   - CHECK_FREQUENCY_MINUTES: Frequency of checks in minutes (default: 360)
+#   - LOG_FILE: Path to the log file (default: docker-monitor.log in script directory)
+#   - CONTAINER_NAMES: Comma-separated list of container names to monitor.
+#                      Overrides the CONTAINER_NAMES_DEFAULT array in config.sh.
+#                      If not set and CONTAINER_NAMES_DEFAULT is empty in config.sh,
+#                      all running containers will be monitored by default.
+#
 # Usage:
-#   ./docker-container-monitor.sh                                          - Monitor all running containers (status, updates, logs)
-#   ./docker-container-monitor.sh <container_name1> <container_name2> ...  - Monitor specific containers
-#   ./docker-container-monitor.sh logs                                     - Show logs for all running containers
-#   ./docker-container-monitor.sh logs <container_name>                    - Show logs for a specific container
+#   ./docker-container-monitor.sh                  - Monitor containers based on config (or all running if config is empty)
+#   ./docker-container-monitor.sh <container_name1> <container_name2> ... - Monitor specific containers
+#   ./docker-container-monitor.sh logs             - Show logs for all running containers
+#   ./docker-container-monitor.sh logs <container_name> - Show logs for a specific container
 #
 # Prerequisites:
 #   - Docker
 #   - jq (for processing JSON output from docker inspect and docker stats)
 #   - skopeo (for checking for container image updates)
-#   - config.sh in the same dir
+#   - (Optional) numfmt: for human-readable formatting in future enhancements (not currently used)
 
-# --- Source Configuration File ---
+# --- Source Configuration File (for defaults and documentation) ---
 CONFIG_FILE="./config.sh"
 if [ -f "$CONFIG_FILE" ]; then
   source "$CONFIG_FILE"
 else
-  echo "Error: Configuration file '$CONFIG_FILE' not found. Please create it."
-  exit 1
+  echo "Warning: Configuration file '$CONFIG_FILE' not found, using environment variables or script defaults."
+  # Continue without config.sh, relying on ENV vars or hardcoded defaults
 fi
 
 # --- ANSI Color Codes ---
@@ -80,6 +94,7 @@ print_message() {
   fi
 }
 
+
 check_container_status() {
   local container_name="$1"
   local status=$(docker inspect -f '{{.State.Status}}' "$container_name" 2>/dev/null)
@@ -98,7 +113,6 @@ check_container_status() {
   local cpu_percent=$(docker stats --no-stream --format '{{.CPU}}' "$container_name" 2>/dev/null)
   local mem_percent=$(docker stats --no-stream --format '{{.MemPerc}}' "$container_name" 2>/dev/null)
   # --- End of Modified section ---
-
 
   if [ "$status" != "running" ]; then
     print_message "  Status: Not running (Status: $status, Health: $health_status, CPU: $cpu_percent, Mem: $mem_percent)" "DANGER"
@@ -266,6 +280,20 @@ if [ "$#" -eq 0 ] || [ "$1" != "logs" ]; then # Run full monitoring unless only 
     fi
   fi
 fi
+
+# --- Log file creation (ensure log file exists at the end, after LOG_FILE is determined) ---
+if [ -n "$LOG_FILE" ]; then
+  if ! [ -f "$LOG_FILE" ]; then
+    touch "$LOG_FILE" # Create log file if it doesn't exist
+    if [ $? -ne 0 ]; then
+      echo "Error: Could not create log file '$LOG_FILE'. Logging to file will be disabled for this run."
+      LOG_FILE="" # Disable logging to file if creation failed
+    else
+      echo "Log file '$LOG_FILE' created."
+    fi
+  fi
+fi
+
 
 print_message "Docker monitoring script completed." "INFO"
 exit 0
