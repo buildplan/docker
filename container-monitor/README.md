@@ -1,3 +1,7 @@
+Make sure the skopeo and jq are installed on the host
+
+`sudo apt install skopeo jq -y`
+
 How to Configure and Run:
 
 Configuration via `config.sh` (for defaults): Edit `config.sh` to set default values for `LOG_LINES_TO_CHECK`, `CHECK_FREQUENCY_MINUTES`, `LOG_FILE`, and the `CONTAINER_NAMES_DEFAULT` array.
