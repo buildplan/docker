@@ -1,4 +1,4 @@
-Prerequisites:
+### Prerequisites:
   - Docker
   - jq (for processing JSON output from docker inspect and docker stats)
   - skopeo (for checking for container image updates)
@@ -6,7 +6,7 @@ Prerequisites:
 
 `sudo apt install skopeo jq -y`
 
-How to Configure and Run:
+### How to Configure and Run:
 
 Configuration via `config.sh` (for defaults): Edit `config.sh` to set default values for `LOG_LINES_TO_CHECK`, `CHECK_FREQUENCY_MINUTES`, `LOG_FILE`, and the `CONTAINER_NAMES_DEFAULT` array.
 
@@ -18,7 +18,7 @@ export CONTAINER_NAMES="nginx,app-container"
 ./docker-container-monitor.sh
 ```
 
-Run the script:
+### Run the script:
 
 `./docker-container-monitor.sh`: Monitors containers based on `config.sh` or `CONTAINER_NAMES` environment variable (or all running containers if no configuration).
 
