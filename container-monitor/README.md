@@ -1,4 +1,8 @@
-Make sure the skopeo and jq are installed on the host
+Prerequisites:
+  - Docker
+  - jq (for processing JSON output from docker inspect and docker stats)
+  - skopeo (for checking for container image updates)
+  - (Optional) numfmt: for human-readable formatting in future enhancements (not currently used)
 
 `sudo apt install skopeo jq -y`
 
