@@ -1,0 +1,19 @@
+services:
+  nextcloud-aio-mastercontainer:
+    image: nextcloud/all-in-one:latest
+    init: true
+    restart: always
+    container_name: nextcloud-aio-mastercontainer
+    volumes:
+      - nextcloud_aio_mastercontainer:/mnt/docker-aio-config
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - APACHE_PORT=11000
+      - APACHE_IP_BINDING=0.0.0.0
+      - NEXTCLOUD_DATADIR=nextcloud_aio_nextcloud_datadir # This is so you can create a volume in portainer called nextcloud_aio_nextcloud_datadir to use for data. In my case on a CIFS share
+    ports:
+      - 8888:8080 # Had to map 8080 to something else becuase 8080 was already mapped on my docker server
+
+volumes:
+  nextcloud_aio_mastercontainer:
+    name: nextcloud_aio_mastercontainer
