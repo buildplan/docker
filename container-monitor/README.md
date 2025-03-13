@@ -16,7 +16,7 @@
 
 #### Make Executable
 
-`chmod +x docker-container-monitor.sh config.sh`
+`chmod +x container-monitor.sh config.sh`
 
 #### Get the docker container name 
 
