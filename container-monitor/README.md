@@ -1,49 +1,84 @@
-## A simple script to monitor docker resources, logs and check for new images/updates. 
+## Docker Container Monitor Script
+
+A simple script to monitor Docker resources, logs, and check for new images/updates.
 
 ### Prerequisites:
-  - Docker
-  - jq (for processing JSON output from docker inspect and docker stats)
-  - skopeo (for checking for container image updates)
-  - (Optional) numfmt: for human-readable formatting in future enhancements (not currently used)
 
-`sudo apt install skopeo jq -y`
+- Docker
+- jq (for processing JSON output from docker inspect and docker stats)
+- skopeo (for checking for container image updates)
+- (Optional) numfmt: for human-readable formatting in future enhancements (not currently used)
 
-### Get this script 
+For Debian-based systems (e.g., Ubuntu), you can install the required tools using:
 
-`curl -o container-monitor.sh https://raw.githubusercontent.com/buildplan/docker/refs/heads/main/container-monitor/container-monitor.sh`
+```bash
+sudo apt install skopeo jq -y
+```
 
-`curl -o config.sh https://raw.githubusercontent.com/buildplan/docker/refs/heads/main/container-monitor/config.sh`
+### Get the Script
 
-#### Make Executable
+Download the script and configuration file using the following commands:
 
-`chmod +x container-monitor.sh config.sh`
+```bash
+curl -o container-monitor.sh https://raw.githubusercontent.com/buildplan/docker/refs/heads/main/container-monitor/container-monitor.sh
+curl -o config.sh https://raw.githubusercontent.com/buildplan/docker/refs/heads/main/container-monitor/config.sh
+```
 
-#### Get the docker container name 
+**Note**: Always verify the integrity of downloaded scripts, especially when downloading from the internet.
 
-`docker ps -a --format '{{.Names}}'`
+### Make Executable
 
-Add the names in config `nano config.sh`
+Make the scripts executable with the following command:
+
+```bash
+chmod +x container-monitor.sh config.sh
+```
+
+### Get Docker Container Names
+
+List all Docker container names with:
+
+```bash
+docker ps -a --format '{{.Names}}'
+```
+
+Add the relevant container names to the `config.sh` file using a text editor:
+
+```bash
+nano config.sh
+```
 
 ### How to Configure and Run:
 
-Configuration via `config.sh` (for defaults): Edit `config.sh` to set default values for `LOG_LINES_TO_CHECK`, `CHECK_FREQUENCY_MINUTES`, `LOG_FILE`, and the `CONTAINER_NAMES_DEFAULT` array.
+**Configuration via `config.sh`**:
+- Edit `config.sh` to set default values for `LOG_LINES_TO_CHECK`, `CHECK_FREQUENCY_MINUTES`, `LOG_FILE`, and the `CONTAINER_NAMES_DEFAULT` array.
 
-Configuration via Environment Variables (for overrides): Set environment variables before running the script to override the defaults from `config.sh`. For example:
+**Configuration via Environment Variables**:
+- Set environment variables before running the script to override the defaults from `config.sh`. For example:
 
-```
+```bash
 export LOG_LINES_TO_CHECK=30
 export CONTAINER_NAMES="nginx,app-container"
 ./container-monitor.sh
 ```
 
-### Run the script:
+### Run the Script:
 
-`./container-monitor.sh`: Monitors containers based on `config.sh` or `CONTAINER_NAMES` environment variable (or all running containers if no configuration).
+- `./container-monitor.sh`: Monitors containers based on `config.sh` or `CONTAINER_NAMES` environment variable (or all running containers if no configuration).
 
-`./container-monitor.sh <container_name1> <container_name2> ...`: Monitors only the specified container names.
+- `./container-monitor.sh <container_name1> <container_name2> ...`: Monitors only the specified container names.
 
-`./container-monitor.sh logs`: Shows logs for all running containers.
+- `./container-monitor.sh logs`: Shows logs for all running containers.
 
-`./container-monitor.sh logs <container_name>`: Shows logs for a specific container.
+- `./container-monitor.sh logs <container_name>`: Shows logs for a specific container.
 
-Check the log file: Output is logged to the file specified by `LOG_FILE` (default `docker-monitor.log`).
+### Logging:
+
+Output is logged to the file specified by `LOG_FILE` (default `docker-monitor.log`). Consider implementing log rotation to manage the size of the log file over time.
+
+### Troubleshooting:
+
+- If you encounter issues, check the log file for detailed error messages.
+- Ensure that Docker is running and that the required tools (`jq`, `skopeo`) are installed.
+- Verify that the container names in `config.sh` are correct and match the running containers.
+
