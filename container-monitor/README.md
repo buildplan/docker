@@ -20,7 +20,7 @@ sudo apt install skopeo jq -y
 Download the script and configuration file using the following commands:
 
 ```bash
-curl -o container-monitor.sh https://raw.githubusercontent.com/buildplan/docker/refs/heads/main/container-monitor/container-monitor.sh
+curl -o containers-monitor.sh 
 curl -o config.sh https://raw.githubusercontent.com/buildplan/docker/refs/heads/main/container-monitor/config.sh
 ```
 
@@ -31,7 +31,7 @@ curl -o config.sh https://raw.githubusercontent.com/buildplan/docker/refs/heads/
 Make the scripts executable with the following command:
 
 ```bash
-chmod +x container-monitor.sh config.sh
+chmod +x containers-monitor.sh config.sh
 ```
 
 ### Get Docker Container Names
@@ -59,18 +59,20 @@ nano config.sh
 ```bash
 export LOG_LINES_TO_CHECK=30
 export CONTAINER_NAMES="nginx,app-container"
-./container-monitor.sh
+./containers-monitor.sh
 ```
 
 ### Run the Script:
 
-- `./container-monitor.sh`: Monitors containers based on `config.sh` or `CONTAINER_NAMES` environment variable (or all running containers if no configuration).
+- `./containers-monitor.sh`: Monitors containers based on `config.sh` or `CONTAINER_NAMES` environment variable (or all running containers if no configuration).
 
 - `./container-monitor.sh <container_name1> <container_name2> ...`: Monitors only the specified container names.
 
-- `./container-monitor.sh logs`: Shows logs for all running containers.
+- `./containers-monitor.sh logs`: Shows logs for all running containers.
 
-- `./container-monitor.sh logs <container_name>`: Shows logs for a specific container.
+- `./containers-monitor.sh logs <container_name>`: Shows logs for a specific container.
+  
+- `./containers-monitor.sh logs errors <container_name>`: Displays only the error messages from the logs of a specific container.
 
 ### Logging:
 
