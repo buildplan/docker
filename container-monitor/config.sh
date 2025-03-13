@@ -8,6 +8,18 @@ LOG_LINES_TO_CHECK="${LOG_LINES_TO_CHECK:-20}"        # Default: 20 lines, can b
 CHECK_FREQUENCY_MINUTES="${CHECK_FREQUENCY_MINUTES:-360}" # Default: 360 mins (6 hours), ENV: CHECK_FREQUENCY_MINUTES
 LOG_FILE="${LOG_FILE:-docker-monitor.log}"           # Default: docker-monitor.log, ENV: LOG_FILE
 
+# Validate LOG_LINES_TO_CHECK is a positive integer
+if ! [[ "$LOG_LINES_TO_CHECK" =~ ^[0-9]+$ ]] || [ "$LOG_LINES_TO_CHECK" -le 0 ]; then
+  echo "Error: LOG_LINES_TO_CHECK must be a positive integer."
+  exit 1
+fi
+
+# Validate CHECK_FREQUENCY_MINUTES is a positive integer
+if ! [[ "$CHECK_FREQUENCY_MINUTES" =~ ^[0-9]+$ ]] || [ "$CHECK_FREQUENCY_MINUTES" -le 0 ]; then
+  echo "Error: CHECK_FREQUENCY_MINUTES must be a positive integer."
+  exit 1
+fi
+
 # Container Names to Monitor (can be overridden by CONTAINER_NAMES env variable - comma separated)
 # Example: CONTAINER_NAMES="container1,container2,container3"
 # If CONTAINER_NAMES environment variable is set, it will override this array.
