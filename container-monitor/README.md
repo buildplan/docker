@@ -1,4 +1,4 @@
-## Docker Container Monitor Script
+## Docker Containers Monitoring Script
 
 A simple script to monitor Docker resources, logs, and check for new images/updates.
 
