@@ -76,7 +76,7 @@ export CONTAINER_NAMES="nginx,app-container"
   
 - `./containers-monitor.sh logs errors <container_name>`: Displays only the error messages from the logs of a specific container.
 
-- `./docker-container-monitor.sh save logs <container_name>` - Save logs for a specific container to a file
+- `./docker-container-monitor.sh save logs <container_name>`: Save logs for a specific container to a file
 
 ### Logging:
 
