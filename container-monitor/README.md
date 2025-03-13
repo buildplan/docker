@@ -20,7 +20,7 @@ sudo apt install skopeo jq -y
 Download the script and configuration file using the following commands:
 
 ```bash
-curl -o containers-monitor.sh 
+curl -o containers-monitor.sh https://raw.githubusercontent.com/buildplan/docker/refs/heads/main/container-monitor/containers-monitor.sh
 curl -o config.sh https://raw.githubusercontent.com/buildplan/docker/refs/heads/main/container-monitor/config.sh
 ```
 
@@ -51,9 +51,11 @@ nano config.sh
 ### How to Configure and Run:
 
 **Configuration via `config.sh`**:
+
 - Edit `config.sh` to set default values for `LOG_LINES_TO_CHECK`, `CHECK_FREQUENCY_MINUTES`, `LOG_FILE`, and the `CONTAINER_NAMES_DEFAULT` array.
 
 **Configuration via Environment Variables**:
+
 - Set environment variables before running the script to override the defaults from `config.sh`. For example:
 
 ```bash
