@@ -1,0 +1,36 @@
+services:
+  server:
+    image: kutt/kutt:latest
+    volumes:
+       - ./db_data:/var/lib/kutt # create a db_data directory 
+       - ./custom:/kutt/custom # create a custom directory 
+    environment:
+      DB_FILENAME: "/var/lib/kutt/data.sqlite"
+      
+      JWT_SECRET: ${JWT_SECRET} # required
+      SITE_NAME: ${SITE_NAME} # required
+      DEFAULT_DOMAIN: ${DEFAULT_DOMAIN} # optional 
+      LINK_LENGTH: ${LINK_LENGTH} # optional 
+      LINK_CUSTOM_ALPHABET: ${LINK_CUSTOM_ALPHABET} # optional - default is to ommit confusing letters and numbers
+      TRUST_PROXY: ${TRUST_PROXY} # optional if using behind a proxy 
+      DISALLOW_REGISTRATION: ${DISALLOW_REGISTRATION} # optional 
+      DISALLOW_ANONYMOUS_LINKS: ${DISALLOW_ANONYMOUS_LINKS} # optional 
+      SERVER_CNAME_ADDRESS: ${SERVER_CNAME_ADDRESS} # optional 
+      CUSTOM_DOMAIN_USE_HTTPS: ${CUSTOM_DOMAIN_USE_HTTPS} # optional 
+      # email smtp settings. optional can be useed for password reset.
+      MAIL_ENABLED: ${MAIL_ENABLED} 
+      MAIL_HOST: ${MAIL_HOST}
+      MAIL_PORT: ${MAIL_PORT}
+      MAIL_SECURE: ${MAIL_SECURE}
+      MAIL_USER: ${MAIL_USER}
+      MAIL_FROM: ${MAIL_FROM}
+      MAIL_PASSWORD: ${MAIL_PASSWORD}
+
+      ENABLE_RATE_LIMIT: ${ENABLE_RATE_LIMIT} # optional 
+      REPORT_EMAIL: ${REPORT_EMAIL} # optional 
+      CONTACT_EMAIL: ${CONTACT_EMAIL} # optional 
+
+    ports:
+      - 127.0.0.1:3888:3000
+    restart: unless-stopped
+
