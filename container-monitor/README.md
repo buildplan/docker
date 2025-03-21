@@ -21,6 +21,8 @@ Download the script and configuration file using the following commands:
 
 ```bash
 curl -o containers-monitor.sh https://raw.githubusercontent.com/buildplan/docker/refs/heads/main/container-monitor/containers-monitor.sh
+```
+```bash
 curl -o config.sh https://raw.githubusercontent.com/buildplan/docker/refs/heads/main/container-monitor/config.sh
 ```
 
