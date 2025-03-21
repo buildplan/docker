@@ -1,0 +1,9 @@
+services:
+  dozzle-agent:
+    image: amir20/dozzle:latest
+    command: agent
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - 100.10.10.10:7117:7007 # local ip or use tailscale/headscale
+      - 127.0.0.1:7117:7007
