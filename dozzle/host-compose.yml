@@ -1,0 +1,25 @@
+services:
+  dozzle:
+    image: amir20/dozzle:latest
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data:/data # create data directory and users.yml
+
+    ports:
+      - 127.0.0.1:8888:8080
+      - 100.11.11.11:8888:8080 #tailscale/headscale ip
+
+    environment:
+      DOZZLE_AUTH_PROVIDER: simple
+      DOZZLE_AUTH_TTL: 48h
+      DOZZLE_NO_ANALYTICS: true
+      DOZZLE_ENABLE_ACTIONS: true
+      DOZZLE_REMOTE_AGENT: agent1-ip:7117,agent2-ip:7117,agent3-ip:7117 #add agent ip / same network or tailscale/headscale 
+
+    healthcheck:
+      test: ["CMD", "/dozzle", "healthcheck"]
+      interval: 30s
+      timeout: 90s
+      retries: 5
+      start_period: 90s
