@@ -1,0 +1,6 @@
+users:
+  user: # user id for login
+    email: doz@email-id.me # email address
+    name: user-name # user name
+    password: $2a$15$b.Rnp/Q3WfMaIR74YGsRBumx6SAznBvPeC89zWOszdHschwplaji # bcrypt hash for password
+    filter:
