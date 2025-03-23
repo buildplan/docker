@@ -1,4 +1,8 @@
 ########################################
+# Create A/AAAA DNS records for heads.domain.com, hui.domain.com, *.ts.domain.com
+# Ports to expose - 80/tcp, 443/tcp, 8080/tcp
+# correct email address for Letsencrypt
+#
 # Folder structure
 #    headscale-deploy - contains - docker-compose.yaml (file), headscale (dir), traefik (dir)
 #        headscale - contains - config (dir), data (dir) 
