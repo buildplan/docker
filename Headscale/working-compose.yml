@@ -38,7 +38,7 @@ services:
     container_name: traefik
     command:
       - --api=true
-      - --api.dashboard=true
+      - --api.dashboard=false
       - --providers.docker
       - --entrypoints.web.address=:80
       - --entrypoints.websecure.address=:443
