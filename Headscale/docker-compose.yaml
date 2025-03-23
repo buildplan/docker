@@ -1,3 +1,14 @@
+########################################
+# Folder structure
+#    headscale-deploy - contains - docker-compose.yaml (file), headscale (dir), traefik (dir)
+#        headscale - contains - config (dir), data (dir) 
+#            config - contains - config.yaml
+#        traefik - contains - auth (dir), certificates (dir)
+#            certificates - contains - a blank acme.json - can be created with 'touch acme.json'
+#            auth - contains - users.htpasswd and gui-users.htpasswd
+#            can be created with 'htpasswd -c ./users.htpasswd user-name' and needs 'sudo apt install apache2-utils'
+########################################
+
 services:
 
   headscale:
