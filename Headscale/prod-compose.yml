@@ -1,3 +1,9 @@
+############################################
+# Need DNS records pointing to public IP heads.example.com and hui.example.com
+# This will bring up headscale, headscale-admin and traefik 
+# headscale will be on heads.example.com and hui.example.com will be heascale-admin interface
+#############################################
+
 services:
 
   headscale:
