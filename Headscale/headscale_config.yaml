@@ -1,7 +1,7 @@
 ###### Place this in the config folder and match the path from docker-compose ######
 ###### create a *.ts.mydomain.tld DNS A/AAAA record for MagicDNS + change below ###
 
-server_url: https://heads.alisufyan.cloud
+server_url: https://heads.example.com # change this
 
 listen_addr: 0.0.0.0:8080
 
