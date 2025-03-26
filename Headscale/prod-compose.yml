@@ -2,6 +2,19 @@
 # Need DNS records pointing to public IP heads.example.com and hui.example.com
 # This will bring up headscale, headscale-admin and traefik 
 # headscale will be on heads.example.com and hui.example.com will be heascale-admin interface
+#
+# Ports to expose - 80/tcp, 443/tcp, 8080/tcp
+# correct email address for Letsencrypt
+#
+# Folder structure
+#    headscale-deploy - contains - docker-compose.yaml (file), headscale (dir), traefik (dir)
+#        headscale - contains - config (dir), data (dir) 
+#            config - contains - config.yaml
+#            data - empty for container to user for db
+#        traefik - contains - auth (dir), certificates (dir)
+#            certificates - contains - a blank acme.json - can be created with 'touch acme.json'
+#            auth - contains - users.htpasswd and gui-users.htpasswd
+#              can be created with 'htpasswd -c ./users.htpasswd user-name' and needs 'sudo apt install apache2-utils'
 #############################################
 
 services:
