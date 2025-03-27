@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # Replace with your repository's raw URL for the main script
-MAIN_SCRIPT_URL="https://raw.githubusercontent.com/buildplan/docker/refs/heads/main/Pangolin/monitor/main.sh"
+MAIN_SCRIPT_URL="https://raw.githubusercontent.com/hhftechnology/pangolin-monitoring/refs/heads/main/main.sh"
 
 # Replace with your repository's raw URL for the dependent script
-DEPENDENT_SCRIPT_URL="https://raw.githubusercontent.com/buildplan/docker/refs/heads/main/Pangolin/monitor/discord.sh"
+DEPENDENT_SCRIPT_URL="https://raw.githubusercontent.com/hhftechnology/pangolin-monitoring/refs/heads/main/discord.sh"
 
 # Replace with the desired filenames (optional, you can keep them the same as in the repo)
 MAIN_SCRIPT_FILENAME="main.sh"
@@ -25,6 +25,7 @@ if [ $? -ne 0 ]; then
   echo "Error downloading dependent script."
   exit 1
 fi
+
 # Make the scripts executable
 echo "Making scripts executable..."
 chmod +x "$MAIN_SCRIPT_FILENAME"
@@ -39,5 +40,3 @@ echo "Running main script..."
 # rm "$MAIN_SCRIPT_FILENAME" "$DEPENDENT_SCRIPT_FILENAME"
 echo "Script execution complete."
 exit 0
-
-
