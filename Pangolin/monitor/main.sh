@@ -1107,69 +1107,133 @@ check_system_load() {
     fi
 }
 
-display_system_resources() {
-    echo -e "${CYAN}=== System Resources ===${NC}"
-    
-    # Get system information
-    local hostname=$(hostname)
-    local os=$(cat /etc/os-release 2>/dev/null | grep "PRETTY_NAME" | cut -d'"' -f2 || echo "Unknown")
-    local kernel=$(uname -r)
-    local cpu_model=$(grep "model name" /proc/cpuinfo | head -n1 | cut -d':' -f2 | sed 's/^[ \t]*//' || echo "Unknown")
-    local cpu_cores=$(nproc)
-    
-    # Get usage metrics
-    local cpu=$(top -bn1 | grep "Cpu(s)" | awk '{print $2 + $4}' | awk '{printf "%.1f", $1}')
-    local mem=$(free -m | awk 'NR==2{printf "%.1f", $3*100/$2}')
-    local mem_used=$(free -h | awk 'NR==2{print $3}')
-    local mem_total=$(free -h | awk 'NR==2{print $2}')
-    local disk=$(df -h / | awk 'NR==2{print $5}')
-    local disk_used=$(df -h / | awk 'NR==2{print $3}')
-    local disk_total=$(df -h / | awk 'NR==2{print $2}')
-    local load=$(uptime | awk -F'[a-z]:' '{print $2}' | sed 's/,//g' | awk '{print $1}')
-    local norm_load=$(echo "scale=2; $load / $cpu_cores" | bc)
-    local uptime=$(uptime -p)
-    
-    # Display system information
-    echo -e "${CYAN}System Information:${NC}"
-    echo -e "  Hostname:   $hostname"
-    echo -e "  OS:         $os"
-    echo -e "  Kernel:     $kernel"
-    echo -e "  CPU:        $cpu_model ($cpu_cores cores)"
-    echo -e "  Uptime:     $uptime"
-    
-    echo -e "\n${CYAN}Resource Usage:${NC}"
-    # Display with color based on thresholds
-    [[ "$cpu" =~ ^[0-9.]+$ ]] && (( $(echo "$cpu > $CPU_WARNING_THRESHOLD" | bc -l) )) && \
-        display_status "WARNING" "CPU Usage: ${cpu}%" || \
-        display_status "OK" "CPU Usage: ${cpu:-N/A}%"
-    
-    [[ "$mem" =~ ^[0-9.]+$ ]] && (( $(echo "$mem > $MEM_WARNING_THRESHOLD" | bc -l) )) && \
-        display_status "WARNING" "Memory Usage: ${mem}% ($mem_used / $mem_total)" || \
-        display_status "OK" "Memory Usage: ${mem:-N/A}% ($mem_used / $mem_total)"
-    
-    [[ "$disk" =~ ^[0-9.]+$ ]] && (( $(echo "${disk%\%} > $DISK_WARNING_THRESHOLD" | bc -l) )) && \
-        display_status "WARNING" "Disk Usage: ${disk} ($disk_used / $disk_total)" || \
-        display_status "OK" "Disk Usage: ${disk} ($disk_used / $disk_total)"
-    
-    [[ "$norm_load" =~ ^[0-9.]+$ ]] && (( $(echo "$norm_load > 1.0" | bc -l) )) && \
-        display_status "WARNING" "Load Average: $load (normalized: ${norm_load}x)" || \
-        display_status "OK" "Load Average: $load (normalized: ${norm_load}x)"
-    
-    echo -e "\n${CYAN}Memory Details:${NC}"
-    free -h | grep -v "Swap"
-    
-    echo -e "\n${CYAN}Disk Usage:${NC}"
-    df -h | grep -v "tmpfs" | grep -v "Use%"
-    
-    echo -e "\n${CYAN}Top CPU Processes:${NC}"
-    ps -eo pid,ppid,cmd,%cpu --sort=-%cpu | head -n 6
-    
-    echo -e "\n${CYAN}Top Memory Processes:${NC}"
-    ps -eo pid,ppid,cmd,%mem --sort=-%mem | head -n 6
-    
-    wait_for_key
-}
+# ========================
+# System Monitoring Display
+# ========================
 
+display_system_resources() {
+    echo -e "${CYAN}=== System Resources Overview ===${NC}"
+
+    # --- Gather System Information ---
+    local hostname=$(hostname)
+    local os_name=$(cat /etc/os-release 2>/dev/null | grep "PRETTY_NAME" | cut -d'"' -f2 || echo "Unknown")
+    local kernel_ver=$(uname -r)
+    local cpu_model=$(grep "model name" /proc/cpuinfo | head -n1 | cut -d':' -f2 | sed 's/^[ \t]*//' || echo "Unknown")
+    local core_count=$(nproc 2>/dev/null || echo "N/A")
+    local sys_uptime=$(uptime -p 2>/dev/null || uptime || echo "Unknown") # uptime -p might fail
+
+    # --- Gather Resource Usage Metrics ---
+
+    # CPU (using vmstat like in check_cpu_usage)
+    local cpu_usage="N/A"
+    if command -v vmstat >/dev/null 2>&1; then
+        local vmstat_output=$(vmstat 1 2 | tail -n 1)
+        local cpu_idle=$(echo "$vmstat_output" | awk '{print $15}')
+        if [[ "$cpu_idle" =~ ^[0-9]+$ && "$cpu_idle" -ge 0 && "$cpu_idle" -le 100 ]]; then
+            cpu_usage=$(LC_ALL=C printf "%.1f" $(echo "100 - $cpu_idle" | bc))
+        fi
+    else
+         log_message "WARNING" "vmstat not found for CPU usage display."
+    fi
+
+    # Memory (using free like in check_memory_usage)
+    local mem_usage="N/A"
+    local mem_used="N/A"
+    local mem_total="N/A"
+    local free_output=$(free -m) # Use -m for calculation
+    local free_output_h=$(free -h) # Use -h for display
+    if [[ -n "$free_output" ]]; then
+        mem_usage=$(echo "$free_output" | awk 'NR==2 {if ($2 > 0) printf "%.1f", $3*100/$2; else print "0.0"}')
+        mem_used=$(echo "$free_output_h" | awk 'NR==2{print $3}')
+        mem_total=$(echo "$free_output_h" | awk 'NR==2{print $2}')
+        # Validate mem_usage
+        if ! [[ "$mem_usage" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then mem_usage="N/A"; fi
+    fi
+
+    # Disk (using df like in check_disk_usage)
+    local disk_usage="N/A"
+    local disk_used="N/A"
+    local disk_total="N/A"
+    local df_output=$(df -h /)
+     if [[ -n "$df_output" ]]; then
+        disk_usage=$(echo "$df_output" | awk 'NR==2 {print $5}') # Includes '%'
+        disk_used=$(echo "$df_output" | awk 'NR==2 {print $3}')
+        disk_total=$(echo "$df_output" | awk 'NR==2 {print $2}')
+        # Validate disk_usage percentage part
+        if ! [[ "${disk_usage%%%}" =~ ^[0-9]+$ ]]; then disk_usage="N/A"; fi
+    fi
+
+    # Load (using logic from fixed check_system_load)
+    local load_avg_1min="N/A"
+    local normalized_load="N/A"
+    local uptime_output=$(uptime)
+    if [[ -n "$uptime_output" ]]; then
+         load_avg_1min=$(echo "$uptime_output" | awk -F'[a-z]:' '{print $2}' | sed 's/,//g' | awk '{print $1}')
+         if [[ "$load_avg_1min" =~ ^[0-9]+([.,][0-9]+)?$ ]]; then
+              load_avg_1min_bc=$(echo "$load_avg_1min" | tr ',' '.') # Ensure '.' for bc
+              if [[ "$core_count" != "N/A" ]]; then
+                   normalized_load=$(LC_ALL=C echo "scale=2; $load_avg_1min_bc / $core_count" | bc)
+                   if [[ "$normalized_load" == .* ]]; then normalized_load="0$normalized_load"; fi
+                   if ! [[ "$normalized_load" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then normalized_load="N/A"; fi
+              fi
+         else
+              load_avg_1min="N/A" # Failed parsing uptime
+         fi
+    fi
+
+    # --- Display System Information ---
+    echo -e "${CYAN}System Information:${NC}"
+    echo -e "  Hostname:   $hostname"
+    echo -e "  OS:         $os_name"
+    echo -e "  Kernel:     $kernel_ver"
+    echo -e "  CPU:        $cpu_model ($core_count cores)"
+    echo -e "  Uptime:     $sys_uptime"
+
+    # --- Display Resource Usage Summary ---
+    echo -e "\n${CYAN}Resource Usage Summary:${NC}"
+    # CPU
+    if [[ "$cpu_usage" != "N/A" ]] && (( $(LC_ALL=C echo "$cpu_usage > $CPU_WARNING_THRESHOLD" | bc -l) )); then
+        display_status "WARNING" "CPU Usage: ${cpu_usage}%"
+    else
+        display_status "OK" "CPU Usage: ${cpu_usage}%"
+    fi
+    # Memory
+    if [[ "$mem_usage" != "N/A" ]] && (( $(LC_ALL=C echo "$mem_usage > $MEM_WARNING_THRESHOLD" | bc -l) )); then
+        display_status "WARNING" "Memory Usage: ${mem_usage}% (${mem_used:-N/A} / ${mem_total:-N/A})"
+    else
+        display_status "OK" "Memory Usage: ${mem_usage}% (${mem_used:-N/A} / ${mem_total:-N/A})"
+    fi
+    # Disk
+    local disk_perc_val="${disk_usage%%%}" # Remove %
+    if [[ "$disk_perc_val" =~ ^[0-9]+$ ]] && (( disk_perc_val > $DISK_WARNING_THRESHOLD )); then
+        display_status "WARNING" "Disk Usage (/): ${disk_usage} (${disk_used:-N/A} / ${disk_total:-N/A})"
+    else
+        display_status "OK" "Disk Usage (/): ${disk_usage} (${disk_used:-N/A} / ${disk_total:-N/A})"
+    fi
+    # Load
+    local load_warning_threshold="1.0" # Define threshold for display
+    if [[ "$normalized_load" != "N/A" ]] && (( $(LC_ALL=C echo "$normalized_load > $load_warning_threshold" | bc -l) )); then
+        display_status "WARNING" "Load Average (1m): $load_avg_1min (Normalized: ${normalized_load}x)"
+    else
+        display_status "OK" "Load Average (1m): $load_avg_1min (Normalized: ${normalized_load}x)"
+    fi
+
+    # --- Display Resource Details ---
+    echo -e "\n${CYAN}Memory Details (free -h):${NC}"
+    free -h | grep --color=never -v "Swap" || echo "  Error running 'free -h'"
+
+    echo -e "\n${CYAN}Disk Usage (df -h):${NC}"
+    # Filter out snap loops, tmpfs, etc. for clarity
+    df -h -x squashfs -x tmpfs -x devtmpfs | grep --color=never -E '^/dev/|Filesystem' || echo "  Error running 'df -h'"
+
+    echo -e "\n${CYAN}Top 5 CPU Processes (ps):${NC}"
+    ps -eo pid,user,%cpu,cmd --sort=-%cpu --no-headers | head -n 5 || echo "  Error running 'ps'"
+
+    echo -e "\n${CYAN}Top 5 Memory Processes (ps):${NC}"
+    ps -eo pid,user,%mem,cmd --sort=-%mem --no-headers | head -n 5 || echo "  Error running 'ps'"
+
+    wait_for_key
+}
 
 # ========================
 # Security Monitoring
