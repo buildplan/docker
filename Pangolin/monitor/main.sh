@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =================================================================
-# This is a modified version of of GitHub user @hhftechnology. Found at:
+# This is a modified version, orignal by @hhftechnology. Found at:
 # https://github.com/hhftechnology/pangolin-monitoring
 # =================================================================
 # Pangolin Stack Monitoring System 
