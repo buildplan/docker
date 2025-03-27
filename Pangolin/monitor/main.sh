@@ -34,8 +34,8 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Default configuration values
-DEFAULT_CHECK_INTERVAL=60         # Seconds between checks
-DEFAULT_REPORT_INTERVAL=43200     # 12 hours in seconds
+DEFAULT_CHECK_INTERVAL=3600         # 1hour Seconds between checks
+DEFAULT_REPORT_INTERVAL=43200       # 12 hours in seconds
 DEFAULT_CONTAINER_NAMES=("pangolin" "gerbil" "traefik" "crowdsec")
 DEFAULT_CPU_WARNING=80
 DEFAULT_CPU_CRITICAL=90
