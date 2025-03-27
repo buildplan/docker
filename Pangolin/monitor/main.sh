@@ -21,7 +21,7 @@ DISCORD_SCRIPT="${SCRIPT_DIR}/discord.sh"
 mkdir -p "${CONFIG_DIR}" "${LOG_DIR}"
 
 # Global variables
-VERSION="1.1_ASC" 
+VERSION="1.1_a" 
 CONFIG_FILE="${CONFIG_DIR}/pangolin_monitor.conf"
 LOG_FILE="${LOG_DIR}/pangolin-monitor.log"
 
