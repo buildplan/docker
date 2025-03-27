@@ -1,5 +1,18 @@
 Pangolin Monitor is a monitoring solution for your Pangolin stack, providing real-time monitoring of containers, system resources, and security metrics with Discord notifications. This menu-based utility helps you maintain the health and security of your Pangolin deployment.
 
+## Dependencies
+
+The script requires these programs to be installed:
+
+-   Pangolin Stack
+-   jq (for JSON processing)
+-   skopeo (for container updates check)
+-   bc (for calculations)
+-   curl (for network requests)
+
+The script can attempt to install missing dependencies when run with appropriate permissions.
+
+
 ## Installation
 
 1.  Download the script :
@@ -162,13 +175,3 @@ You can edit this file directly or use the configuration menu to adjust settings
 -   Check the log file at `./logs/pangolin-monitor.log` for details about errors
 -   Enable debug mode through the configuration menu for more verbose logging
 
-## Dependencies
-
-The script requires these programs to be installed:
-
--   Pangolin Stack
--   jq (for JSON processing)
--   bc (for calculations)
--   curl (for network requests)
-
-The script can attempt to install missing dependencies when run with appropriate permissions.
