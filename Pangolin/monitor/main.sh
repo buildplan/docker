@@ -1940,55 +1940,65 @@ generate_security_report() {
 
     # --- System Resources ---
     report+="**System Resources:**\n"
-    # Reuse check functions to get current values (note: doesn't use historical data)
-    local cpu_usage=$(top -bn1 | grep '%Cpu(s)' | sed -n 's/.*, *\([0-9.]*\)%* id.*/\1/p' | awk '{print 100 - $1}' | printf "%.1f")
-    local mem_usage=$(free -m | awk 'NR==2 {if ($2>0) printf "%.1f", $3*100/$2; else print "0.0"}')
-    local disk_usage=$(df -h / | awk 'NR==2 {print $5}')
-    local load_raw=$(uptime | awk -F'load average: ' '{print $2}' | cut -d',' -f1) # 1-min load avg
-    local cores=$(nproc 2>/dev/null || echo 1) # Default to 1 core if nproc fails
-    local load_norm="N/A"
-    if [[ "$load_raw" =~ ^[0-9]+(\.[0-9]+)?$ && "$cores" =~ ^[1-9][0-9]*$ ]]; then
-         load_norm=$(echo "scale=2; $load_raw / $cores" | bc)
+    # Reuse check functions logic to get current values
+    local cpu_usage="N/A"
+    if command -v vmstat >/dev/null 2>&1; then
+        local vmstat_output=$(vmstat 1 2 | tail -n 1)
+        local cpu_idle=$(echo "$vmstat_output" | awk '{print $15}')
+        if [[ "$cpu_idle" =~ ^[0-9]+$ && "$cpu_idle" -ge 0 && "$cpu_idle" -le 100 ]]; then
+            cpu_usage=$(LC_ALL=C printf "%.1f" $(echo "100 - $cpu_idle" | bc))
+        fi
+    fi
+    local mem_usage="N/A"; local mem_used="N/A"; local mem_total="N/A"
+    local free_output=$(free -m); local free_output_h=$(free -h)
+    if [[ -n "$free_output" ]]; then
+        mem_usage=$(echo "$free_output" | awk 'NR==2 {if ($2 > 0) printf "%.1f", $3*100/$2; else print "0.0"}')
+        mem_used=$(echo "$free_output_h" | awk 'NR==2{print $3}')
+        mem_total=$(echo "$free_output_h" | awk 'NR==2{print $2}')
+        if ! [[ "$mem_usage" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then mem_usage="N/A"; fi
+    fi
+    local disk_usage="N/A"; local disk_used="N/A"; local disk_total="N/A"
+    local df_output=$(df -h /)
+     if [[ -n "$df_output" ]]; then
+        disk_usage=$(echo "$df_output" | awk 'NR==2 {print $5}'); disk_used=$(echo "$df_output" | awk 'NR==2 {print $3}'); disk_total=$(echo "$df_output" | awk 'NR==2 {print $2}')
+        if ! [[ "${disk_usage%%%}" =~ ^[0-9]+$ ]]; then disk_usage="N/A"; fi
+    fi
+    local load_avg_1min="N/A"; local normalized_load="N/A"; local core_count=$(nproc 2>/dev/null || echo 1)
+    local uptime_output=$(uptime)
+    if [[ -n "$uptime_output" ]]; then
+         load_avg_1min=$(echo "$uptime_output" | awk -F'[a-z]:' '{print $2}' | sed 's/,//g' | awk '{print $1}')
+         if [[ "$load_avg_1min" =~ ^[0-9]+([.,][0-9]+)?$ ]]; then
+              load_avg_1min_bc=$(echo "$load_avg_1min" | tr ',' '.')
+              normalized_load=$(LC_ALL=C echo "scale=2; $load_avg_1min_bc / $core_count" | bc)
+              if [[ "$normalized_load" == .* ]]; then normalized_load="0$normalized_load"; fi
+              if ! [[ "$normalized_load" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then normalized_load="N/A"; fi
+         else load_avg_1min="N/A"; fi
     fi
 
     report+="* CPU Usage: \`${cpu_usage:-N/A}%\`\n"
-    report+="* Memory Usage: \`${mem_usage:-N/A}%\`\n"
-    report+="* Disk Usage (/): \`${disk_usage:-N/A}\`\n"
-    report+="* Load (1m avg): \`${load_raw:-N/A}\` (Normalized: \`${load_norm:-N/A}x\`)\n\n"
+    report+="* Memory Usage: \`${mem_usage:-N/A}%\` (${mem_used:-N/A}/${mem_total:-N/A})\n"
+    report+="* Disk Usage (/): \`${disk_usage:-N/A}\` (${disk_used:-N/A}/${disk_total:-N/A})\n"
+    report+="* Load (1m avg): \`${load_avg_1min:-N/A}\` (Normalized: \`${normalized_load:-N/A}x\`)\n\n"
 
     # Check thresholds and update severity if needed
-    if [[ "$cpu_usage" =~ ^[0-9.]+$ ]] && (( $(echo "$cpu_usage > $CPU_WARNING_THRESHOLD" | bc -l) )); then severity="warning"; fi
-    if [[ "$mem_usage" =~ ^[0-9.]+$ ]] && (( $(echo "$mem_usage > $MEM_WARNING_THRESHOLD" | bc -l) )); then severity="warning"; fi
-    if [[ "${disk_usage%%%}" =~ ^[0-9]+$ ]] && (( ${disk_usage%%%} > $DISK_WARNING_THRESHOLD )); then severity="warning"; fi # Remove % for comparison
-    if [[ "$load_norm" != "N/A" ]] && (( $(echo "$load_norm > 1.0" | bc -l) )); then severity="warning"; fi # Warn if norm load > 1.0
-
+    if [[ "$cpu_usage" != "N/A" ]] && (( $(LC_ALL=C echo "$cpu_usage > $CPU_WARNING_THRESHOLD" | bc -l) )); then severity="warning"; fi
+    if [[ "$mem_usage" != "N/A" ]] && (( $(LC_ALL=C echo "$mem_usage > $MEM_WARNING_THRESHOLD" | bc -l) )); then severity="warning"; fi
+    local disk_perc_val="${disk_usage%%%}"; if [[ "$disk_perc_val" =~ ^[0-9]+$ ]] && (( disk_perc_val > $DISK_WARNING_THRESHOLD )); then severity="warning"; fi
+    local load_warn_thr="1.0"; if [[ "$normalized_load" != "N/A" ]] && (( $(LC_ALL=C echo "$normalized_load > $load_warn_thr" | bc -l) )); then severity="warning"; fi
 
     # --- Network Status ---
+    # ... (Network section remains unchanged) ...
     report+="**Network Status:**\n"
     local interface=$(ls /sys/class/net/ 2>/dev/null | grep -v "lo" | head -n 1)
     if [[ -n "$interface" ]]; then
-        # Get packet rate (similar to monitor_network_traffic but simplified for report)
         local pkt=0
         local pkt_old=$(grep "$interface:" /proc/net/dev 2>/dev/null | cut -d ':' -f2 | awk '{ print $2 }')
-        sleep 1 # Short sleep for rate calculation
+        sleep 1
         local pkt_new=$(grep "$interface:" /proc/net/dev 2>/dev/null | cut -d ':' -f2 | awk '{ print $2 }')
-
-        if [[ "$pkt_new" =~ ^[0-9]+$ && "$pkt_old" =~ ^[0-9]+$ && $pkt_new -ge $pkt_old ]]; then
-             pkt=$(( pkt_new - pkt_old ))
-        fi
-        report+="* Interface: \`$interface\`\n"
-        report+="* Current Traffic: \`$pkt\` packets/sec\n"
-
-        # Check threshold
-        if [[ $pkt -gt $NETWORK_THRESHOLD ]]; then
-            report+="* $(emoji_map ':warning:') **Warning:** Traffic above threshold (${NETWORK_THRESHOLD} packets/s)\n"
-            severity="warning"
-        else
-            report+="* Traffic within normal parameters.\n"
-        fi
-    else
-        report+="* Could not determine primary network interface.\n"
-    fi
+        if [[ "$pkt_new" =~ ^[0-9]+$ && "$pkt_old" =~ ^[0-9]+$ && $pkt_new -ge $pkt_old ]]; then pkt=$(( pkt_new - pkt_old )); fi
+        report+="* Interface: \`$interface\`\n"; report+="* Current Traffic: \`$pkt\` packets/sec\n"
+        if [[ $pkt -gt $NETWORK_THRESHOLD ]]; then report+="* $(emoji_map ':warning:') **Warning:** Traffic above threshold (${NETWORK_THRESHOLD} packets/s)\n"; severity="warning"; else report+="* Traffic within normal parameters.\n"; fi
+    else report+="* Could not determine primary network interface.\n"; fi
     report+="\n"
 
 
@@ -1996,8 +2006,6 @@ generate_security_report() {
     report+="**SSH Activity (Last 24h):**\n"
     local ssh_failures=0
     local ssh_success=0
-
-    # Check common log sources (simplified check just for counts)
     if command -v journalctl >/dev/null 2>&1; then
         ssh_failures=$(journalctl -u ssh -u sshd --since "1 day ago" --no-pager --output cat 2>/dev/null | grep -c "Failed password" || echo 0)
         ssh_success=$(journalctl -u ssh -u sshd --since "1 day ago" --no-pager --output cat 2>/dev/null | grep -c "Accepted" || echo 0)
@@ -2008,51 +2016,42 @@ generate_security_report() {
         ssh_failures=$(grep "sshd.*Failed password" "/var/log/secure" 2>/dev/null | wc -l)
         ssh_success=$(grep "sshd.*Accepted" "/var/log/secure" 2>/dev/null | wc -l)
     fi
+    # Ensure counts are numeric
+    [[ "$ssh_failures" =~ ^[0-9]+$ ]] || ssh_failures=0
+    [[ "$ssh_success" =~ ^[0-9]+$ ]] || ssh_success=0
 
     report+="* Failed login attempts: \`$ssh_failures\`\n"
     report+="* Successful logins: \`$ssh_success\`\n"
-    if (( ssh_failures > 10 )); then # Highlight if failures seem high
+    # ** FIX: Add check if ssh_failures is numeric before arithmetic comparison **
+    if [[ "$ssh_failures" =~ ^[0-9]+$ ]] && (( ssh_failures > 10 )); then
          report+="* $(emoji_map ':warning:') High number of failed login attempts noted.\n"
          severity="warning"
     fi
     report+="\n"
 
-
     # --- Container Status ---
+    # ... (Container status section remains unchanged) ...
     report+="**Container Status:**\n"
     local all_containers_ok=true
     for container in "${CONTAINER_NAMES[@]}"; do
-        local inspect_output
-        inspect_output=$(docker inspect --format='{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}N/A{{end}}|{{.Config.Image}}' "$container" 2>/dev/null)
-        local exit_code=$?
-
-        if [[ $exit_code -ne 0 ]]; then
-            report+="* $(emoji_map ':x:') \`$container\`: Not found or inspect failed.\n"
-            all_containers_ok=false
-            continue
-        fi
-
-        local status=$(echo "$inspect_output" | cut -d'|' -f1)
-        local health=$(echo "$inspect_output" | cut -d'|' -f2)
-        local image=$(echo "$inspect_output" | cut -d'|' -f3)
-
-        if [[ "$status" == "running" && ("$health" == "healthy" || "$health" == "N/A") ]]; then
-            report+="* $(emoji_map ':check:') \`$container\` (\`${image##*/}\`): Running (Health: $health)\n" # Show image name only
-        else
-            report+="* $(emoji_map ':warning:') \`$container\` (\`${image##*/}\`): Status **$status** (Health: $health)\n"
-            all_containers_ok=false
-        fi
+        local inspect_output; inspect_output=$(docker inspect --format='{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}N/A{{end}}|{{.Config.Image}}' "$container" 2>/dev/null)
+        if [[ $? -ne 0 ]]; then report+="* $(emoji_map ':x:') \`$container\`: Not found or inspect failed.\n"; all_containers_ok=false; continue; fi
+        local status=$(echo "$inspect_output" | cut -d'|' -f1); local health=$(echo "$inspect_output" | cut -d'|' -f2); local image=$(echo "$inspect_output" | cut -d'|' -f3)
+        if [[ "$status" == "running" && ("$health" == "healthy" || "$health" == "N/A") ]]; then report+="* $(emoji_map ':check:') \`$container\` (\`${image##*/}\`): Running (Health: $health)\n"; else report+="* $(emoji_map ':warning:') \`$container\` (\`${image##*/}\`): Status **$status** (Health: $health)\n"; all_containers_ok=false; fi
     done
-    if [[ "$all_containers_ok" == "false" ]]; then
-         severity="warning" # If any container has issues, report is warning
-    fi
+    if [[ "$all_containers_ok" == "false" ]]; then severity="warning"; fi
 
 
     # --- Send report to Discord ---
-    # Only send if webhook is valid
     if validate_discord_webhook "$DISCORD_WEBHOOK" >/dev/null; then
-        send_discord_message "$title" "$report" "$severity" "" "Pangolin Security"
-        log_message "INFO" "Security report generated and sent to Discord (Severity: $severity)"
+        # Call send_discord_message (use the modified version from Step 2 below)
+        if send_discord_message "$title" "$report" "$severity" "" "Pangolin Security"; then
+             log_message "INFO" "Security report generated and sent to Discord (Severity: $severity)"
+        else
+             # Error message is now logged inside send_discord_message
+             # Log here that the report send failed specifically
+             log_message "ERROR" "Attempt to send security report failed."
+        fi
     else
         log_message "ERROR" "Cannot send security report: Discord webhook is invalid or not configured."
     fi
