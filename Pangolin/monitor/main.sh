@@ -1,7 +1,8 @@
 #!/bin/bash
 
 # =================================================================
-# Pangolin Stack Monitoring System
+# This is a modified version of of GitHub user @hhftechnology
+# Pangolin Stack Monitoring System 
 # A comprehensive monitoring solution for Pangolin containers
 # Features:
 # - Container monitoring (health, resources, logs, image updates)
