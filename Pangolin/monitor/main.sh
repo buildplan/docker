@@ -1633,127 +1633,144 @@ analyze_traefik_logs() {
 }
 
 # ========================
-# NEW: Container Image Update Check (using skopeo)
+# NEW: Container Image Update Check (using skopeo - Platform Naive)
 # ========================
 
 check_container_image_updates() {
-    log_message "INFO" "Checking for container image updates using skopeo"
+    log_message "INFO" "Checking for container image updates using skopeo (Platform Naive)"
     echo -e "${CYAN}=== Checking Container Image Updates ===${NC}"
 
-    # Check dependencies
-    if ! command -v skopeo >/dev/null 2>&1; then
-        log_message "ERROR" "skopeo command not found. Cannot check for image updates."
-        echo -e "${RED}skopeo command not found. Please install skopeo.${NC}"
-        return 1
-    fi
-    if ! command -v jq >/dev/null 2>&1; then
-        log_message "ERROR" "jq command not found. Cannot process skopeo output."
-        echo -e "${RED}jq command not found. Please install jq.${NC}"
-        return 1
-    fi
-    if ! command -v docker >/dev/null 2>&1; then
-        log_message "ERROR" "docker command not found. Cannot get local image info."
-        echo -e "${RED}docker command not found.${NC}"
-        return 1
-    fi
+    # Dependency checks
+    if ! command -v skopeo >/dev/null 2>&1; then log_message "ERROR" "skopeo command not found."; echo -e "${RED}skopeo not found.${NC}"; return 1; fi
+    if ! command -v jq >/dev/null 2>&1; then log_message "ERROR" "jq command not found."; echo -e "${RED}jq not found.${NC}"; return 1; fi
+    if ! command -v docker >/dev/null 2>&1; then log_message "ERROR" "docker command not found."; echo -e "${RED}docker not found.${NC}"; return 1; fi
 
     local update_count=0
     local update_details=""
 
     for container in "${CONTAINER_NAMES[@]}"; do
         printf "   Checking %-15s: " "$container"
-        # Check if container exists and is running
         local container_status
         container_status=$(docker inspect --format='{{.State.Status}}' "$container" 2>/dev/null)
-        if [[ $? -ne 0 ]]; then
-             echo -e "${YELLOW}Not found${NC}"
-             continue
-        fi
-         if [[ "$container_status" != "running" ]]; then
-             echo -e "${YELLOW}Not running${NC}"
+        if [[ $? -ne 0 || "$container_status" != "running" ]]; then
+             echo -e "${YELLOW}Not running/found${NC}"
              continue
         fi
 
-        # Get image name with tag, local digest ID, ARCH, and OS from the running container
-        local inspect_data
-        inspect_data=$(docker inspect --format='{{.Config.Image}}|{{.Image}}|{{.Platform}}' "$container" 2>/dev/null)
-        local image_name_tag=$(echo "$inspect_data" | cut -d'|' -f1)
-        local local_digest_id=$(echo "$inspect_data" | cut -d'|' -f2) # Image manifest ID used by container
-        local platform=$(echo "$inspect_data" | cut -d'|' -f3) # e.g., linux/amd64 or linux/arm64
+        # --- Get Image Info ---
+        local image_name_from_config local_digest_id
+        # Image name as specified in container config (e.g., traefik:v3.0, library/ubuntu:latest, fosrl/pangolin:1.1.0)
+        image_name_from_config=$(docker inspect --format='{{.Config.Image}}' "$container" 2>/dev/null)
+        # Digest ID of the actual image the container is running
+        local_digest_id=$(docker inspect --format='{{.Image}}' "$container" 2>/dev/null)
 
-        # Extract Arch and OS from platform string
-        local container_arch=$(echo "$platform" | cut -d'/' -f2)
-        local container_os=$(echo "$platform" | cut -d'/' -f1)
-
-
-        if [[ -z "$image_name_tag" || -z "$local_digest_id" || -z "$container_arch" || -z "$container_os" ]]; then
-            log_message "WARNING" "Could not get image/platform info for container '$container'"
+        if [[ -z "$image_name_from_config" || -z "$local_digest_id" ]]; then
+            log_message "WARNING" "Could not get image/digest info for container '$container'"
             echo -e "${YELLOW}Info unavailable${NC}"
             continue
         fi
 
-        # Check if image name looks like a digest (no tag to check)
-        if [[ "$image_name_tag" == *sha256:* ]]; then
-             log_message "DEBUG" "Container '$container' uses image digest '$image_name_tag', skipping remote tag check."
+        if [[ "$image_name_from_config" == *sha256:* ]]; then
+             log_message "DEBUG" "Container '$container' uses image digest '$image_name_from_config', skipping remote tag check."
              echo -e "${CYAN}Using digest, skipped${NC}"
              continue
         fi
 
-        # Query remote registry using skopeo FOR THE CONTAINER'S SPECIFIC PLATFORM
-        log_message "DEBUG" "Inspecting remote image '$image_name_tag' for platform '$platform'..."
-        # Increase timeout, specify platform
-        local remote_info
-        remote_info=$(timeout 30 skopeo inspect --override-os "$container_os" --override-arch "$container_arch" "docker://$image_name_tag" 2>/dev/null)
+        # --- Parse Image Name (similar to old script) ---
+        local image_name_to_parse="$image_name_from_config"
+        local tag="latest" # Default tag
+        local image_name_no_tag=""
+
+        # Separate tag if present
+        if [[ "$image_name_to_parse" == *:* ]]; then
+            tag="${image_name_to_parse##*:}"
+            image_name_no_tag="${image_name_to_parse%:*}"
+        else
+            image_name_no_tag="$image_name_to_parse"
+            # tag remains 'latest'
+        fi
+
+        local registry=""
+        local image_path="" # The part after registry (e.g., library/ubuntu, fosrl/pangolin)
+
+        # Heuristic to find registry based on '.' or ':' before the first '/'
+        # Examples: ghcr.io/user/img, my-reg:5000/img, user/img (docker hub), library/img (docker hub official)
+        local first_slash_pos=$(awk -v str="$image_name_no_tag" 'BEGIN{print index(str,"/")}')
+        if [[ "$first_slash_pos" -gt 0 ]]; then
+             local potential_registry="${image_name_no_tag:0:$((first_slash_pos-1))}"
+             # Check if the part before the first slash looks like a domain name or includes a port
+             if [[ "$potential_registry" == *.* || "$potential_registry" == *:* ]]; then
+                  registry="$potential_registry"
+                  image_path="${image_name_no_tag#*/}"
+             else
+                  # Assume Docker Hub (no domain/port before first slash)
+                  registry="registry-1.docker.io"
+                  image_path="$image_name_no_tag" # Path includes user/repo or just repo
+             fi
+        else
+             # No slash found - assume official Docker Hub image
+             registry="registry-1.docker.io"
+             image_path="library/$image_name_no_tag" # Prepend library/
+        fi
+        log_message "DEBUG" "Parsed for skopeo: Registry='$registry', Path='$image_path', Tag='$tag'"
+        # --- End Parsing ---
+
+
+        # --- Skopeo Inspect (Platform Naive) ---
+        log_message "DEBUG" "Inspecting remote image (platform naive): docker://$registry/$image_path:$tag"
+        local skopeo_output skopeo_stderr
+        # Call skopeo WITHOUT platform overrides
+        skopeo_output=$(timeout 30 skopeo inspect "docker://$registry/$image_path:$tag" 2> >(skopeo_stderr=$(cat); cat >&2))
         local skopeo_exit_code=$?
 
-        if [[ $skopeo_exit_code -ne 0 || -z "$remote_info" ]]; then
-            # Handle common skopeo errors more gracefully
+        # Check for skopeo failure
+        if [[ $skopeo_exit_code -ne 0 || -z "$skopeo_output" ]]; then
             local error_msg="skopeo failed"
             if [[ $skopeo_exit_code -eq 124 ]]; then error_msg="skopeo timed out"; fi
-            # Check if manifest for platform is missing (common with multi-arch tags)
-            # Note: Error messages might vary between skopeo versions
-            if echo "$remote_info" | grep -q -i "manifest unknown\|not found"; then
-                 error_msg="manifest for platform $platform not found in registry"
-            fi
-
-            log_message "WARNING" "$error_msg inspecting remote image '$image_name_tag' for container '$container' (Platform: $platform, Exit: $skopeo_exit_code)"
+            if [[ -n "$skopeo_stderr" ]]; then error_msg+=" (stderr: $(echo "$skopeo_stderr" | tr -d '\n'))"; fi
+            log_message "WARNING" "$error_msg inspecting remote image 'docker://$registry/$image_path:$tag' for container '$container' (Exit: $skopeo_exit_code)"
             echo -e "${YELLOW}Remote check failed${NC}"
             continue
         fi
 
-        local remote_digest=$(echo "$remote_info" | jq -r '.Digest // ""')
+        # Parse remote digest from successful skopeo output
+        local remote_digest=$(echo "$skopeo_output" | jq -r '.Digest // ""')
 
         if [[ -z "$remote_digest" ]]; then
-            log_message "WARNING" "Could not parse remote digest for image '$image_name_tag' (Platform: $platform)."
+            log_message "WARNING" "Could not parse remote digest for image 'docker://$registry/$image_path:$tag'. Skopeo output: $skopeo_output"
             echo -e "${YELLOW}Digest parse failed${NC}"
             continue
         fi
+        # --- End Skopeo Inspect ---
 
-        # Compare local running image ID with the remote digest for the tag/platform
-        # Both should be in format sha256:xxxx
+
+        # --- Compare Digests ---
+        # Compare local running image ID with the remote digest for the tag
         if [[ "$local_digest_id" != "$remote_digest" ]]; then
-            log_message "INFO" "Update potentially available for '$container' ('$image_name_tag', platform '$platform'). Local ID: $local_digest_id, Remote Digest: $remote_digest"
+            log_message "INFO" "Update potentially available for '$container' ('$image_name_from_config'). Running ID: $local_digest_id, Remote '$tag' Digest: $remote_digest"
             echo -e "${GREEN}$(emoji_map ':update:') Update available${NC}"
-            update_details+="\n- $(emoji_map ':update:') **$container**: Image \`$image_name_tag\` (Platform: $platform) has an update."
+            update_details+="\n- $(emoji_map ':update:') **$container**: Image \`$image_name_from_config\` has an update (Remote tag '$tag' changed)."
             update_count=$((update_count + 1))
         else
-            log_message "DEBUG" "Container '$container' ('$image_name_tag', platform '$platform') is up-to-date."
+            log_message "DEBUG" "Container '$container' ('$image_name_from_config') is up-to-date with remote tag '$tag'."
             echo -e "${GREEN}Up-to-date${NC}"
         fi
-    done
+        # --- End Comparison ---
 
-    # Send notification if updates found and notifications enabled
+    done # End container loop
+
+    # --- Send Notification / Final Message ---
     if [[ $update_count -gt 0 && "$IMAGE_UPDATE_NOTIFY" == "true" ]]; then
         log_message "INFO" "$update_count container image updates available, sending notification."
         local title="Container Image Updates Available"
-        local message="Found **$update_count** potential container image updates based on tag digests for the running platform:$update_details\n\nConsider running \`docker-compose pull\` or equivalent to update images before recreating containers."
+        local message="Found **$update_count** potential container image updates based on remote tag digests:$update_details\n\nConsider running \`docker-compose pull\` or equivalent to update images before recreating containers."
         send_discord_message "$title" "$message" "info" "" "Image Updates"
     elif [[ "$IMAGE_UPDATE_NOTIFY" == "true" ]]; then
-         log_message "INFO" "No container image updates found for running platforms."
-         echo -e "\n${GREEN}No updates found for running container platforms.${NC}" # Add feedback to console
+         log_message "INFO" "No container image updates found."
+         echo -e "\n${GREEN}No updates found for running container images based on remote tags.${NC}"
     fi
 
-    return $update_count # Return number of updates found
+    return $update_count
 }
 
 
