@@ -1662,37 +1662,61 @@ check_container_image_updates() {
 
     for container in "${CONTAINER_NAMES[@]}"; do
         printf "   Checking %-15s: " "$container"
-        # Check if container exists
-        if ! docker ps -a --format '{{.Names}}' | grep -q "^${container}$"; then
+        # Check if container exists and is running
+        local container_status
+        container_status=$(docker inspect --format='{{.State.Status}}' "$container" 2>/dev/null)
+        if [[ $? -ne 0 ]]; then
              echo -e "${YELLOW}Not found${NC}"
              continue
         fi
+         if [[ "$container_status" != "running" ]]; then
+             echo -e "${YELLOW}Not running${NC}"
+             continue
+        fi
 
-        # Get image name with tag and local digest
-        local image_name_tag=$(docker inspect --format='{{.Config.Image}}' "$container" 2>/dev/null)
-        local local_digest=$(docker inspect --format='{{.Image}}' "$container" 2>/dev/null) # Image manifest digest used by container
+        # Get image name with tag, local digest ID, ARCH, and OS from the running container
+        local inspect_data
+        inspect_data=$(docker inspect --format='{{.Config.Image}}|{{.Image}}|{{.Platform}}' "$container" 2>/dev/null)
+        local image_name_tag=$(echo "$inspect_data" | cut -d'|' -f1)
+        local local_digest_id=$(echo "$inspect_data" | cut -d'|' -f2) # Image manifest ID used by container
+        local platform=$(echo "$inspect_data" | cut -d'|' -f3) # e.g., linux/amd64 or linux/arm64
 
-        if [[ -z "$image_name_tag" || -z "$local_digest" ]]; then
-            log_message "WARNING" "Could not get image info for container $container"
+        # Extract Arch and OS from platform string
+        local container_arch=$(echo "$platform" | cut -d'/' -f2)
+        local container_os=$(echo "$platform" | cut -d'/' -f1)
+
+
+        if [[ -z "$image_name_tag" || -z "$local_digest_id" || -z "$container_arch" || -z "$container_os" ]]; then
+            log_message "WARNING" "Could not get image/platform info for container '$container'"
             echo -e "${YELLOW}Info unavailable${NC}"
             continue
         fi
 
         # Check if image name looks like a digest (no tag to check)
         if [[ "$image_name_tag" == *sha256:* ]]; then
-             log_message "DEBUG" "Container $container uses image digest $image_name_tag, skipping remote tag check."
+             log_message "DEBUG" "Container '$container' uses image digest '$image_name_tag', skipping remote tag check."
              echo -e "${CYAN}Using digest, skipped${NC}"
              continue
         fi
 
-        # Query remote registry using skopeo
-        # Use --override-os linux --override-arch amd64 as skopeo might default to host OS/Arch
-        # Increase timeout in case of slow registry
-        local remote_info=$(timeout 30 skopeo inspect --override-os linux --override-arch amd64 "docker://$image_name_tag" 2>/dev/null)
+        # Query remote registry using skopeo FOR THE CONTAINER'S SPECIFIC PLATFORM
+        log_message "DEBUG" "Inspecting remote image '$image_name_tag' for platform '$platform'..."
+        # Increase timeout, specify platform
+        local remote_info
+        remote_info=$(timeout 30 skopeo inspect --override-os "$container_os" --override-arch "$container_arch" "docker://$image_name_tag" 2>/dev/null)
         local skopeo_exit_code=$?
 
         if [[ $skopeo_exit_code -ne 0 || -z "$remote_info" ]]; then
-            log_message "WARNING" "skopeo failed to inspect remote image $image_name_tag for container $container (Exit: $skopeo_exit_code)"
+            # Handle common skopeo errors more gracefully
+            local error_msg="skopeo failed"
+            if [[ $skopeo_exit_code -eq 124 ]]; then error_msg="skopeo timed out"; fi
+            # Check if manifest for platform is missing (common with multi-arch tags)
+            # Note: Error messages might vary between skopeo versions
+            if echo "$remote_info" | grep -q -i "manifest unknown\|not found"; then
+                 error_msg="manifest for platform $platform not found in registry"
+            fi
+
+            log_message "WARNING" "$error_msg inspecting remote image '$image_name_tag' for container '$container' (Platform: $platform, Exit: $skopeo_exit_code)"
             echo -e "${YELLOW}Remote check failed${NC}"
             continue
         fi
@@ -1700,19 +1724,20 @@ check_container_image_updates() {
         local remote_digest=$(echo "$remote_info" | jq -r '.Digest // ""')
 
         if [[ -z "$remote_digest" ]]; then
-            log_message "WARNING" "Could not parse remote digest for image $image_name_tag from skopeo output."
+            log_message "WARNING" "Could not parse remote digest for image '$image_name_tag' (Platform: $platform)."
             echo -e "${YELLOW}Digest parse failed${NC}"
             continue
         fi
 
-        # Compare digests
-        if [[ "$local_digest" != "$remote_digest" ]]; then
-            log_message "INFO" "Update available for $container ($image_name_tag). Local: $local_digest, Remote: $remote_digest"
+        # Compare local running image ID with the remote digest for the tag/platform
+        # Both should be in format sha256:xxxx
+        if [[ "$local_digest_id" != "$remote_digest" ]]; then
+            log_message "INFO" "Update potentially available for '$container' ('$image_name_tag', platform '$platform'). Local ID: $local_digest_id, Remote Digest: $remote_digest"
             echo -e "${GREEN}$(emoji_map ':update:') Update available${NC}"
-            update_details+="\n- $(emoji_map ':update:') **$container**: Image \`$image_name_tag\` has an update."
+            update_details+="\n- $(emoji_map ':update:') **$container**: Image \`$image_name_tag\` (Platform: $platform) has an update."
             update_count=$((update_count + 1))
         else
-            log_message "DEBUG" "Container $container ($image_name_tag) is up-to-date."
+            log_message "DEBUG" "Container '$container' ('$image_name_tag', platform '$platform') is up-to-date."
             echo -e "${GREEN}Up-to-date${NC}"
         fi
     done
@@ -1721,10 +1746,11 @@ check_container_image_updates() {
     if [[ $update_count -gt 0 && "$IMAGE_UPDATE_NOTIFY" == "true" ]]; then
         log_message "INFO" "$update_count container image updates available, sending notification."
         local title="Container Image Updates Available"
-        local message="Found **$update_count** potential container image updates based on tag digests:$update_details\n\nConsider running \`docker-compose pull\` or equivalent to update."
+        local message="Found **$update_count** potential container image updates based on tag digests for the running platform:$update_details\n\nConsider running \`docker-compose pull\` or equivalent to update images before recreating containers."
         send_discord_message "$title" "$message" "info" "" "Image Updates"
     elif [[ "$IMAGE_UPDATE_NOTIFY" == "true" ]]; then
-         log_message "INFO" "No container image updates found."
+         log_message "INFO" "No container image updates found for running platforms."
+         echo -e "\n${GREEN}No updates found for running container platforms.${NC}" # Add feedback to console
     fi
 
     return $update_count # Return number of updates found
