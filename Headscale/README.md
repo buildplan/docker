@@ -14,11 +14,16 @@ This guide details how to deploy Headscale, a self-hosted Tailscale control serv
 
 ## Prerequisites
 
-1.  **Server:** A Linux server (recommended) accessible from the internet.
+1.  **Server:** A Linux server (recommended) accessible from the internet with a public IP address.
 2.  **Docker & Docker Compose:** Installed on the server. ([Install Docker](https://docs.docker.com/engine/install/), [Install Docker Compose](https://docs.docker.com/compose/install/))
-3.  **Domain Names:** Two domain/subdomain names (e.g., `heads.yourdomain.com` and `hsadmin.yourdomain.com`).
-4.  **DNS Records:** Pointing both domain names (A or AAAA records) to your server's public IP address. DNS must resolve correctly *before* starting Traefik for Let's Encrypt validation.
-5.  **Firewall:** Ports 80 (for HTTP challenge) and 443 (for HTTPS) must be open on your server's firewall.
+3.  **Domain Names:** Two domain/subdomain names (e.g., `heads.yourdomain.com` and `hsadmin.yourdomain.com`). You own these domains and can manage their DNS records.
+4.  **DNS Records:**
+    * An **A record** (for IPv4) or **AAAA record** (for IPv6) for `heads.yourdomain.com` pointing to your server's public IP address.
+    * An **A record** (for IPv4) or **AAAA record** (for IPv6) for `hsadmin.yourdomain.com` pointing to your server's public IP address.
+    * **Crucially:** These DNS records must be created and fully propagated *before* you start the Docker Compose setup for the first time, otherwise Let's Encrypt validation will fail.
+5.  **Firewall:** The following TCP ports must be **open for inbound traffic** on your server's firewall:
+    * **Port 80:** Required by Traefik for the Let's Encrypt HTTP-01 challenge to issue HTTPS certificates.
+    * **Port 443:** Required for standard HTTPS traffic to access your services.
 
 ## Directory Structure
 
@@ -34,9 +39,10 @@ headscale-deploy/
 │   │   └── config.yaml
 │   └── data/        # (Created automatically by Headscale)
 └── traefik/
-    ├── certificates/  # (Created automatically by Traefik/ACME or create)
+    ├── certificates/  # (Created automatically by Traefik/ACME)
     └── logs/
-        └── traefik.log # (Created automatically by Traefik or run touch traefik.log)
+        └── traefik.log # (Created automatically by Traefik)
+
 ```
 
 ## Configuration Files
@@ -124,13 +130,13 @@ integration:
 
 # Optional OIDC Configuration (Uncomment and configure if needed)
 # oidc:
-#   issuer: "[https://your-oidc-provider.com](https://www.google.com/search?q=https://your-oidc-provider.com)"
+#   issuer: "[https://your-oidc-provider.com](https://your-oidc-provider.com)"
 #   client_id: "your-client-id"
 #   client_secret: "<your-client-secret>" # Or use client_secret_path
 #   # Create API key with: docker compose exec headscale headscale apikeys create --expiration 999d
 #   headscale_api_key: "<your-headscale-api-key-for-oidc-bootstrap>"
 #   # Publicly accessible callback URL for Headplane
-#   redirect_uri: "[https://heads.yourdomain.com/admin/oidc/callback](https://www.google.com/search?q=https://heads.yourdomain.com/admin/oidc/callback)"
+#   redirect_uri: "[https://heads.yourdomain.com/admin/oidc/callback](https://heads.yourdomain.com/admin/oidc/callback)"
 ```
 
 **-> Remember to generate and set a strong `cookie_secret`!**
@@ -183,7 +189,7 @@ services:
 
   headplane:
     # Use specific versions
-    image: ghcr.io/tale/headplane:0.5.5
+    image: ghcr.io/tale/headplane:0.5.1
     pull_policy: always
     container_name: headplane
     restart: unless-stopped
@@ -207,7 +213,7 @@ services:
 
   traefik:
     # Use a specific, stable version
-    image: traefik:v3.1.4 # Latest at the time of writing.
+    image: traefik:v3.1.1 # Or v3.3.4 if confirmed stable for you
     pull_policy: always
     container_name: traefik
     restart: unless-stopped
@@ -273,8 +279,8 @@ services:
     cd /path/to/headscale-deploy
     ```
 2.  Ensure all configuration files (`docker-compose.yaml`, `headscale/config/config.yaml`, `headplane/config.yaml`) are created and customized as needed (domains, email, secrets).
-3.  Ensure your DNS records are pointing correctly to your server IP.
-4.  Ensure ports 80 and 443 are open in your firewall.
+3.  **Verify DNS records** are pointing correctly to your server IP and have propagated.
+4.  **Verify firewall rules** allow inbound traffic on TCP ports 80 and 443.
 5.  Start the services:
     ```bash
     docker compose up -d
@@ -283,7 +289,7 @@ services:
     ```bash
     docker compose logs -f traefik headscale headplane headscale-admin
     ```
-    Look for successful ACME certificate messages in the Traefik logs.
+    Look for successful ACME certificate messages in the Traefik logs for both domain names.
 
 ## Accessing Services
 
@@ -311,5 +317,3 @@ Once deployed successfully:
 * **OIDC:** Configure the `oidc:` section in `headplane/config.yaml` for single sign-on.
 * **Headscale Config:** Explore `headscale/config/config.yaml` for advanced features like ACLs, DNS configuration, etc.
 * **Traefik:** Explore Traefik documentation for advanced routing, middlewares, authentication, etc.
-
-```
