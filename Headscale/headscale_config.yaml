@@ -1,14 +1,8 @@
-###### Place this in the config folder and match the path from docker-compose ######
-###### create a *.ts.mydomain.tld DNS A/AAAA record for MagicDNS + change below ###
-
-server_url: https://heads.example.com # change this
-
+server_url: https://heads.change_me.com
 listen_addr: 0.0.0.0:8080
-
 metrics_listen_addr: 127.0.0.1:9090
 
 grpc_listen_addr: 127.0.0.1:50443
-
 grpc_allow_insecure: false
 
 noise:
@@ -18,8 +12,8 @@ prefixes:
   v4: 100.64.0.0/10
   v6: fd7a:115c:a1e0::/48
   allocation: sequential
-
-derp: #to implement later/currently disabled
+  
+derp:
   server:
     enabled: false
     region_id: 999
@@ -35,7 +29,7 @@ derp: #to implement later/currently disabled
   paths: []
   auto_update_enabled: true
   update_frequency: 24h
-  
+
 disable_check_updates: false
 
 ephemeral_node_inactivity_timeout: 30m
@@ -52,6 +46,15 @@ database:
     path: /var/lib/headscale/db.sqlite
     write_ahead_log: true
     wal_autocheckpoint: 1000
+    
+acme_url: https://acme-v02.api.letsencrypt.org/directory
+acme_email: ""
+tls_letsencrypt_hostname: ""
+tls_letsencrypt_cache_dir: /var/lib/headscale/cache
+tls_letsencrypt_challenge_type: HTTP-01
+tls_letsencrypt_listen: ":http"
+tls_cert_path: ""
+tls_key_path: ""
 
 log:
   format: text
@@ -63,22 +66,21 @@ policy:
 
 dns:
   magic_dns: true
-  base_domain: ts.mydomain.tld ######## make sure create a *.ts.mydomain.tld DNS A/AAAA record
+  base_domain: ts.change_me.com
   nameservers:
     global:
-      - https://dns.nextdns.io/99999/VPS%20Headscale # NextDNS
+      - https://dns.nextdns.io/99zzzz/myVPS%20Headscale # NextDNS - change this or comment out. 
       - 1.1.1.1
+      - 1.0.0.1
       - 2606:4700:4700::1111
       - 2606:4700:4700::1001
     split:
       {}
   search_domains: []
-  extra_records: []
-    search_domains: []
-  extra_records: []
-  
-unix_socket: /var/run/headscale/headscale.sock
 
+  extra_records: []
+
+unix_socket: /var/run/headscale/headscale.sock
 unix_socket_permission: "0770"
 
 logtail:
