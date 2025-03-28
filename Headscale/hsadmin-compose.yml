@@ -1,4 +1,3 @@
-## removed SimpleAuth from this. Current working copy ##
 services:
 
   headscale:
@@ -12,7 +11,7 @@ services:
       - ./headscale/data:/var/lib/headscale
     labels:
       - traefik.enable=true
-      - traefik.http.routers.headscale-rtr.rule=Host(`heads.domain.tld`) # change this
+      - traefik.http.routers.headscale-rtr.rule=Host(`heads.change_me.com`)
       - traefik.http.routers.headscale-rtr.entrypoints=websecure
       - traefik.http.routers.headscale-rtr.tls.certresolver=myresolver
       - traefik.http.services.headscale-svc.loadbalancer.server.port=8080
@@ -25,7 +24,7 @@ services:
     restart: unless-stopped
     labels:
       - traefik.enable=true
-      - traefik.http.routers.headscale-admin-rtr.rule=Host(`hui.domain.tld`) && PathPrefix(`/admin`) # change this
+      - traefik.http.routers.headscale-admin-rtr.rule=Host(`hui.change_me.com`) && PathPrefix(`/admin`)
       - traefik.http.routers.headscale-admin-rtr.entrypoints=websecure
       - traefik.http.routers.headscale-admin-rtr.tls.certresolver=myresolver
       - traefik.http.services.headscale-admin-svc.loadbalancer.server.port=80
@@ -37,13 +36,16 @@ services:
     restart: unless-stopped
     container_name: traefik
     command:
+      - --log.filePath=/var/log/traefik.log
+      - --accesslog=true
+      - --log.level=INFO
       - --api=true
       - --api.dashboard=false
       - --providers.docker
       - --entrypoints.web.address=:80
       - --entrypoints.websecure.address=:443
       - --certificatesresolvers.myresolver.acme.tlschallenge=true
-      - --certificatesresolvers.myresolver.acme.email=letse@domain.tld # change this
+      - --certificatesresolvers.myresolver.acme.email=letse@change_me.com
       - --certificatesresolvers.myresolver.acme.storage=/certificates/acme.json
       - --global.sendAnonymousUsage=false
     ports:
@@ -52,11 +54,29 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik/certificates:/certificates
+      - ./traefik/logs/traefik.log:/var/log/traefik.log
     labels:
       # CORS Middleware Configuration
       - traefik.http.middlewares.corsHeader.headers.accesscontrolallowmethods=GET,OPTIONS,PUT
       - traefik.http.middlewares.corsHeader.headers.accesscontrolallowheaders=Authorization, *
-      - traefik.http.middlewares.corsHeader.headers.accesscontrolalloworiginlist=https://hui.domain.tld # change this
+      - traefik.http.middlewares.corsHeader.headers.accesscontrolalloworiginlist=https://hui.change_me.com
       - traefik.http.middlewares.corsHeader.headers.accesscontrolmaxage=100
       - traefik.http.middlewares.corsHeader.headers.addvaryheader=true
 
+      # --- Middleware to Redirect root path (/) to /admin ---
+      - traefik.http.middlewares.redirect-hui-root-to-admin.redirectregex.regex=^https?://([^/]+)/?$$
+      - traefik.http.middlewares.redirect-hui-root-to-admin.redirectregex.replacement=https://$${1}/admin
+      - traefik.http.middlewares.redirect-hui-root-to-admin.redirectregex.permanent=true # Use true for a 301 permanent redirect
+      # --- Router to apply the root redirect for hui.change_me.com ---
+      - traefik.http.routers.hui-root-redirect.rule=Host(`hui.change_me.com`) && Path(`/`)
+      - traefik.http.routers.hui-root-redirect.entrypoints=websecure
+      - traefik.http.routers.hui-root-redirect.tls.certresolver=myresolver
+      - traefik.http.routers.hui-root-redirect.middlewares=redirect-hui-root-to-admin@docker
+      # No .service needed as this router only redirects
+
+      # Redirect HTTP to HTTPS (Recommended)
+      - traefik.http.routers.http-catchall.rule=hostregexp(`{host:.+}`)
+      - traefik.http.routers.http-catchall.entrypoints=web
+      - traefik.http.routers.http-catchall.middlewares=redirect-to-https@docker
+      - traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https
+      - traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true
