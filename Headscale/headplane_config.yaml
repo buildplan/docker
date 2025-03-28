@@ -1,7 +1,14 @@
+# Goes in headplane dir. 
+# headscale-deploy/
+# ├── docker-compose.yaml
+# ├── headplane/
+# │   └── config.yaml
+
+
 server:
   host: "0.0.0.0"
   port: 3000
-  cookie_secret: "e919e1ef413afb3c851aaea648b6bc56" # Change this!
+  cookie_secret: "16151413121110090807060504030201" # Change this with exacly 32 cr
   cookie_secure: true
 
 headscale:
