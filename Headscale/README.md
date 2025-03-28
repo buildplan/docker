@@ -183,7 +183,7 @@ services:
 
   headplane:
     # Use specific versions
-    image: ghcr.io/tale/headplane:0.5.1
+    image: ghcr.io/tale/headplane:0.5.5
     pull_policy: always
     container_name: headplane
     restart: unless-stopped
@@ -207,7 +207,7 @@ services:
 
   traefik:
     # Use a specific, stable version
-    image: traefik:v3.1.1 # Or v3.3.4 if confirmed stable for you
+    image: traefik:v3.1.4 # Latest at the time of writing.
     pull_policy: always
     container_name: traefik
     restart: unless-stopped
