@@ -14,7 +14,7 @@ This guide details how to deploy Headscale, a self-hosted Tailscale control serv
 
 ## Prerequisites
 
-1.  **Server:** A Linux server (recommended) accessible from the internet with a public IP address.
+1.  **Server:** A Linux server (I used Debian 12) accessible from the internet with a public IP address.
 2.  **Docker & Docker Compose:** Installed on the server. ([Install Docker](https://docs.docker.com/engine/install/), [Install Docker Compose](https://docs.docker.com/compose/install/))
 3.  **Domain Names:** Two domain/subdomain names (e.g., `heads.yourdomain.com` and `hsadmin.yourdomain.com`). You own these domains and can manage their DNS records.
 4.  **DNS Records:**
