@@ -1,8 +1,8 @@
 # Deploying Headscale with Headscale-Admin & Headplane via Docker Compose + Traefik
 
-This guide details how to deploy Headscale, a self-hosted Tailscale control server, along with two popular web UIs (Headscale-Admin and Headplane), using Docker Compose. Traefik is used as a reverse proxy to handle HTTPS (via Let's Encrypt) and route traffic appropriately to the different services. Configuration is now enhanced by using environment variables for domain and email settings and a dedicated `tls.yml` for improved TLS security.
+This guide details how to deploy Headscale, a self-hosted Tailscale control server, along with two popular web UIs (Headscale-Admin and Headplane), using Docker Compose. Traefik is used as a reverse proxy to handle HTTPS (via Let's Encrypt) and route traffic appropriately to the different services. This setup uses environment variables for domain and email settings and a dedicated `tls.yml` for improved TLS security.
 
-**Current Setup Overview (as of [Date of Last Update]):**
+**Current Setup Overview:**
 
 * **Headscale API:** Accessible at `https://${HS_URL}` (for clients)
 * **Headscale-Admin UI:** Accessible at `https://${HUI_URL}/admin`
@@ -14,7 +14,7 @@ This guide details how to deploy Headscale, a self-hosted Tailscale control serv
 
 ## Prerequisites
 
-1.  **Server:** A Linux server (I used Debian 12) accessible from the internet with a public IP address.
+1.  **Server:** A Linux server (recommended) accessible from the internet with a public IP address.
 2.  **Docker & Docker Compose:** Installed on the server. ([Install Docker](https://docs.docker.com/engine/install/), [Install Docker Compose](https://docs.docker.com/compose/install/))
 3.  **Domain Names:** Two domain/subdomain names (e.g., `heads.yourdomain.com` and `hsadmin.yourdomain.com`). You own these domains and can manage their DNS records.
 4.  **DNS Records:**
@@ -38,17 +38,17 @@ headscale-deploy/
 ├── headscale/
 │   ├── config/
 │   │   └── config.yaml
-│   └── data/       # (Created automatically by Headscale)
+│   └── data/
 └── traefik/
-    ├── certificates/ # (Created automatically by Traefik/ACME)
+    ├── certificates/
     ├── logs/
-    │   └── traefik.log # (Created automatically by Traefik)
-    └── tls.yml     # New: Custom TLS options
+    │   └── traefik.log
+    └── tls.yml
 ```
 
 ## Environment Variables (.env)
 
-Create a file named `.env` in the root of your `headscale-deploy` directory. This will store your domain names and email, making the `docker-compose.yaml` cleaner and easier to manage.
+Create a file named `.env` in the root of your `headscale-deploy` directory. This will store your domain names and email.
 
 ```
 # .env
@@ -157,7 +157,7 @@ integration:
 
 ### 3. Docker Compose (`docker-compose.yaml`)
 
-This file in the root of your `headscale-deploy` directory defines all the services and their interactions. It now uses environment variables for domain names and email and includes a `secureHeaders` middleware and TLS options.
+This file in the root of your `headscale-deploy` directory defines all the services and their interactions. It uses environment variables for domain names and email and includes a `secureHeaders` middleware and TLS options.
 
 ```yaml
 # docker-compose.yaml
@@ -171,7 +171,6 @@ services:
         restart: unless-stopped
         command: serve
         volumes:
-            # Mount config and data directories from host
             - ./headscale/config:/etc/headscale
             - ./headscale/data:/var/lib/headscale
         labels:
@@ -202,21 +201,18 @@ services:
         container_name: headplane
         restart: unless-stopped
         volumes:
-            - ./headplane/config.yaml:/etc/headplane/config.yaml:ro # Read-only
-            - ./headscale/config:/etc/headscale:ro # Read-only
-            - /var/run/docker.sock:/var/run/docker.sock:ro # Read-only
+            - ./headplane/config.yaml:/etc/headplane/config.yaml:ro
+            - ./headscale/config:/etc/headscale:ro
+            - /var/run/docker.sock:/var/run/docker.sock:ro
         depends_on:
             - headscale
         labels:
             - traefik.enable=true
-            # Rule to match /admin path on the headscale host
             - traefik.http.routers.headplane-rtr.rule=Host(`${HS_URL}`) && PathPrefix(`/admin`)
-            # Set priority HIGHER than headscale's router for the same host
             - traefik.http.routers.headplane-rtr.priority=100
             - traefik.http.routers.headplane-rtr.entrypoints=websecure
             - traefik.http.routers.headplane-rtr.tls.certresolver=myresolver
-            - traefik.http.services.headplane-svc.loadbalancer.server.port=3000 # Headplane's internal port
-            # Apply CORS and security headers
+            - traefik.http.services.headplane-svc.loadbalancer.server.port=3000
             - traefik.http.routers.headplane-rtr.middlewares=corsHeader@docker,secureHeaders@docker
 
     traefik:
@@ -238,7 +234,7 @@ services:
             - --certificatesresolvers.myresolver.acme.email=${LE_EMAIL}
             - --certificatesresolvers.myresolver.acme.storage=/certificates/acme.json
             - --global.sendAnonymousUsage=false
-            - --entrypoints.websecure.http.tls.options=securetls@file # for TLS
+            - --entrypoints.websecure.http.tls.options=securetls@file
         ports:
             - 80:80
             - 443:443
@@ -246,7 +242,7 @@ services:
             - /var/run/docker.sock:/var/run/docker.sock:ro
             - ./traefik/certificates:/certificates
             - ./traefik/logs/traefik.log:/var/log/traefik.log
-            - ./traefik/tls.yml:/tls.yml  # Custom TLS
+            - ./traefik/tls.yml:/tls.yml
         logging:
             driver: "json-file"
             options:
@@ -258,16 +254,12 @@ services:
             timeout: 3s
             retries: 3
             start_period: 20s
-
         labels:
-            # CORS middleware for API calls ---
             - traefik.http.middlewares.corsHeader.headers.accesscontrolallowmethods=GET,OPTIONS,PUT
             - traefik.http.middlewares.corsHeader.headers.accesscontrolallowheaders=Authorization,*
-            - traefik.http.middlewares.corsHeader.headers.accesscontrolalloworiginlist=https://${HUI_URL},https://${HS_URL} # add in .env
+            - traefik.http.middlewares.corsHeader.headers.accesscontrolalloworiginlist=https://${HUI_URL},https://${HS_URL}
             - traefik.http.middlewares.corsHeader.headers.accesscontrolmaxage=100
             - traefik.http.middlewares.corsHeader.headers.addvaryheader=true
-
-            # --- Redirect ${HUI_URL} root path (/) to /admin ---
             - traefik.http.middlewares.redirect-hui-root-to-admin.redirectregex.regex=^https?://([^/]+)/?$$
             - traefik.http.middlewares.redirect-hui-root-to-admin.redirectregex.replacement=https://$${1}/admin
             - traefik.http.middlewares.redirect-hui-root-to-admin.redirectregex.permanent=true
@@ -275,41 +267,31 @@ services:
             - traefik.http.routers.hui-root-redirect.entrypoints=websecure
             - traefik.http.routers.hui-root-redirect.tls.certresolver=myresolver
             - traefik.http.routers.hui-root-redirect.middlewares=redirect-hui-root-to-admin@docker,secureHeaders@docker
-
-            # --- Redirect ${HS_URL} root path (/) to /admin ---
             - traefik.http.middlewares.redirect-hs-root-to-admin.redirectregex.regex=^https?://([^/]+)/?$$
             - traefik.http.middlewares.redirect-hs-root-to-admin.redirectregex.replacement=https://$${1}/admin
             - traefik.http.middlewares.redirect-hs-root-to-admin.redirectregex.permanent=true
-            # Router for the root path of ${HS_URL}
             - traefik.http.routers.hs-root-redirect.rule=Host(`${HS_URL}`) && Path(`/`)
-            - traefik.http.routers.hs-root-redirect.priority=95 # Higher than headscale (90), lower than headplane (100)
+            - traefik.http.routers.hs-root-redirect.priority=95
             - traefik.http.routers.hs-root-redirect.entrypoints=websecure
             - traefik.http.routers.hs-root-redirect.tls.certresolver=myresolver
             - traefik.http.routers.hs-root-redirect.middlewares=redirect-hs-root-to-admin@docker,secureHeaders@docker
             - traefik.http.routers.hs-root-redirect.service=noop@internal
-
-            # --- HSTS Security Headers ---
-            - traefik.http.middlewares.secureHeaders.headers.stsSeconds=31536000  # 1 year
+            - traefik.http.middlewares.secureHeaders.headers.stsSeconds=31536000
             - traefik.http.middlewares.secureHeaders.headers.stsIncludeSubdomains=true
             - traefik.http.middlewares.secureHeaders.headers.stsPreload=true
             - traefik.http.middlewares.secureHeaders.headers.forceSTSHeader=true
-
-            # --- Global Redirect HTTP to HTTPS ---
             - traefik.http.routers.http-catchall.rule=hostregexp(`{host:.+}`)
             - traefik.http.routers.http-catchall.entrypoints=web
             - traefik.http.routers.http-catchall.middlewares=redirect-to-https@docker
             - traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https
             - traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true
-
-            # --- Enforce Secure Cookies & Enhanced Security ---
             - traefik.http.middlewares.secureHeaders.headers.browserXssFilter=true
             - traefik.http.middlewares.secureHeaders.headers.contentTypeNosniff=true
             - traefik.http.middlewares.secureHeaders.headers.referrerPolicy=same-origin
             - traefik.http.middlewares.secureHeaders.headers.customrequestheaders.X-Forwarded-Proto=https
             - traefik.http.middlewares.secureHeaders.headers.customresponseheaders.Strict-Transport-Security=max-age=31536000; includeSubDomains; preload
-            - traefik.http.middlewares.secureHeaders.headers.frameDeny=true  # Prevent Clickjacking
-            - traefik.http.middlewares.secureHeaders.headers.permissionsPolicy=geolocation=(), microphone=(), camera=()  # Restrict Browser Features
-```
+            - traefik.http.middlewares.secureHeaders.headers.frameDeny=true
+            - traefik.http.middlewares.secureHeaders.headers.permissionsPolicy=geolocation=(), microphone=(), camera=()
 
 ### 4. Traefik TLS Options (`traefik/tls.yml`)
 
@@ -321,24 +303,22 @@ tls:
     options:
         securetls:
             minVersion: VersionTLS12
-            maxVersion: VersionTLS13  # Explicitly enable TLS 1.3
+            maxVersion: VersionTLS13
             cipherSuites:
-                # TLS 1.2 ciphers
                 - TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
                 - TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
                 - TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305
                 - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
                 - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
                 - TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305
-                # TLS 1.3 ciphers
                 - TLS_AES_128_GCM_SHA256
                 - TLS_AES_256_GCM_SHA384
                 - TLS_CHACHA20_POLY1305_SHA256
             curvePreferences:
-                - X25519  # Faster and secure (preferred for TLS 1.3)
-                - CurveP256  # Widely supported and secure
-                - CurveP384  # Stronger fallback
-            sniStrict: true  # Require valid SNI (prevent default cert misuse)
+                - X25519
+                - CurveP256
+                - CurveP384
+            sniStrict: true
 ```
 
 ## Deployment Steps
@@ -349,16 +329,25 @@ tls:
     cd /path/to/headscale-deploy
     ```
 
-2.  Ensure all configuration files (`docker-compose.yaml`, `.env`, `headscale/config/config.yaml`, `headplane/config.yaml`, `traefik/tls.yml`) are created and customized as needed (domains, email, secrets).
-3.  **Verify DNS records** are pointing correctly to your server IP and have propagated.
-4.  **Verify firewall rules** allow inbound traffic on TCP ports 80 and 443.
-5.  Start the services:
+2.  Create all directories listed in the directory structure.
+
+3.  Create the `traefik/logs/traefik.log` file, and give it the proper permissions.
+
+    ```bash
+    touch traefik/logs/traefik.log
+    chmod 666 traefik/logs/traefik.log
+    ```
+
+4.  Ensure all configuration files (`docker-compose.yaml`, `.env`, `headscale/config/config.yaml`, `headplane/config.yaml`, `traefik/tls.yml`) are created and customized as needed (domains, email, secrets).
+5.  **Verify DNS records** are pointing correctly to your server IP and have propagated.
+6.  **Verify firewall rules** allow inbound traffic on TCP ports 80 and 443.
+7.  Start the services:
 
     ```bash
     docker compose up -d
     ```
 
-6.  Monitor the logs, especially Traefik's for certificate acquisition and Headscale/Headplane for startup messages:
+8.  Monitor the logs, especially Traefik's for certificate acquisition and Headscale/Headplane for startup messages:
 
     ```bash
     docker compose logs -f traefik headscale headplane headscale-admin
@@ -376,7 +365,7 @@ Once deployed successfully:
 
 ## Important Notes
 
-* **Headscale TLS Warning:** You will likely see a `WRN Listening without TLS but ServerURL does not start with http://` in the `headscale` logs. This is **normal and expected** in this setup because Traefik handles TLS. Ignore this warning.
+* **Headscale TLS Warning:** You will likely see a `WRN Listening without TLS but ServerURL does not start with http://` in the `headscale` logs. This is normal and expected in this setup because Traefik handles TLS. Ignore this warning.
 * **Headplane Login:** If not using OIDC, Headplane will require a Headscale API key for initial login and subsequent administrative actions. Create one *after* startup using:
 
     ```bash
@@ -394,3 +383,4 @@ Once deployed successfully:
 * **OIDC:** Configure the `oidc:` section in `headplane/config.yaml` for single sign-on.
 * **Headscale Config:** Explore `headscale/config/config.yaml` for advanced features like ACLs, DNS configuration, etc.
 * **Traefik:** Explore Traefik documentation for advanced routing, middlewares, authentication, etc.
+```
