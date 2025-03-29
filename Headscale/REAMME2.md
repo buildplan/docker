@@ -10,7 +10,7 @@ This guide details how to deploy Headscale, a self-hosted Tailscale control serv
 * **Traefik:** Handles HTTPS certificates, routing, and security headers.
 * **Headplane Integration:** Uses Docker socket integration to manage Headscale.
 
-*(Note: Domain names and email are now managed via the `.env` file. See "Environment Variables (.env)" below.)*
+*(Note: Domain names and email are managed via the `.env` file. See "Environment Variables (.env)" below.)*
 
 ## Prerequisites
 
