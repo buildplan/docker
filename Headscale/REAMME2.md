@@ -361,7 +361,7 @@ Once deployed successfully:
 
 * **Headscale API:** `https://${HS_URL}` (Use this in Tailscale clients)
 * **Headscale-Admin UI:** `https://${HUI_URL}` (Should redirect to `/admin`)
-* **Headplane UI:** `https://${HS_URL}/admin`
+* **Headplane UI:** `https://${HS_URL}/admin` (Should redirect to `/admin`)
 
 ## Important Notes
 
