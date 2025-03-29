@@ -32,7 +32,7 @@ Create the following directory structure on your server (e.g., in `/opt/headscal
 ```
 headscale-deploy/
 ├── docker-compose.yaml
-├── .env           # New: Environment variable file
+├── .env           # Environment variable file
 ├── headplane/
 │   └── config.yaml
 ├── headscale/
