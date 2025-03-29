@@ -292,7 +292,7 @@ services:
             - traefik.http.middlewares.secureHeaders.headers.customresponseheaders.Strict-Transport-Security=max-age=31536000; includeSubDomains; preload
             - traefik.http.middlewares.secureHeaders.headers.frameDeny=true
             - traefik.http.middlewares.secureHeaders.headers.permissionsPolicy=geolocation=(), microphone=(), camera=()
-
+```
 ### 4. Traefik TLS Options (`traefik/tls.yml`)
 
 This file defines custom TLS options for Traefik to enhance security.
