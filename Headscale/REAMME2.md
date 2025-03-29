@@ -1,6 +1,6 @@
 # Deploying Headscale with Headscale-Admin & Headplane via Docker Compose + Traefik
 
-This guide details how to deploy Headscale, a self-hosted Tailscale control server, along with two popular web UIs (Headscale-Admin and Headplane), using Docker Compose. Traefik is used as a reverse proxy to handle HTTPS (via Let's Encrypt) and route traffic appropriately to the different services. This setup uses environment variables for domain and email settings and a dedicated `tls.yml` for improved TLS security.
+This guide details how to deploy [Headscale](https://github.com/juanfont/headscale), a self-hosted [Tailscale](https://tailscale.com/kb) control server, along with two popular web UIs ([Headscale-Admin](https://github.com/GoodiesHQ/headscale-admin) and [Headplane](https://github.com/tale/headplane)), using Docker Compose. Traefik is used as a reverse proxy to handle HTTPS (via Let's Encrypt) and route traffic appropriately to the different services. This setup uses environment variables for domain and email settings and a dedicated `tls.yml` for improved TLS security.
 
 **Current Setup Overview:**
 
@@ -380,7 +380,9 @@ Once deployed successfully:
 ## Customization
 
 * **Versions:** Change the image tags in `docker-compose.yaml` to use different versions of Headscale, Headplane, Headscale-Admin, or Traefik. Check for compatibility.
+    * Headscale: [https://github.com/juanfont/headscale](https://github.com/juanfont/headscale)
+    * Headscale-admin: [https://github.com/GoodiesHQ/headscale-admin](https://github.com/GoodiesHQ/headscale-admin)
+    * Headplane: [https://github.com/tale/headplane](https://github.com/tale/headplane)
 * **OIDC:** Configure the `oidc:` section in `headplane/config.yaml` for single sign-on.
 * **Headscale Config:** Explore `headscale/config/config.yaml` for advanced features like ACLs, DNS configuration, etc.
 * **Traefik:** Explore Traefik documentation for advanced routing, middlewares, authentication, etc.
-```
