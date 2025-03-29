@@ -25,7 +25,7 @@ services:
     restart: unless-stopped
     labels:
       - traefik.enable=true
-      - traefik.http.routers.headscale-admin-rtr.rule=Host(`${HUI_URL}`) && PathPrefix(`/admin`)
+      - traefik.http.routers.headscale-admin-rtr.rule=Host(`${HUI_URL}`) && PathPrefix(`/admin`)  # add actual URL in .env
       - traefik.http.routers.headscale-admin-rtr.entrypoints=websecure
       - traefik.http.routers.headscale-admin-rtr.tls.certresolver=myresolver
       - traefik.http.services.headscale-admin-svc.loadbalancer.server.port=80
