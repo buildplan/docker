@@ -101,6 +101,7 @@ services:
       - traefik.http.middlewares.corsHeader.headers.accesscontrolalloworiginlist=https://${HUI_URL},https://${HS_URL} # add in .env
       - traefik.http.middlewares.corsHeader.headers.accesscontrolmaxage=100
       - traefik.http.middlewares.corsHeader.headers.addvaryheader=true
+      
       # --- Redirect ${HUI_URL} root path (/) to /admin ---
       - traefik.http.middlewares.redirect-hui-root-to-admin.redirectregex.regex=^https?://([^/]+)/?$$
       - traefik.http.middlewares.redirect-hui-root-to-admin.redirectregex.replacement=https://$${1}/admin
@@ -110,7 +111,7 @@ services:
       - traefik.http.routers.hui-root-redirect.tls.certresolver=myresolver
       - traefik.http.routers.hui-root-redirect.middlewares=redirect-hui-root-to-admin@docker
 
-      # --- NEW: Redirect heads.${HS_URL} root path (/) to /admin ---
+      # --- Redirect heads.${HS_URL} root path (/) to /admin ---
       - traefik.http.middlewares.redirect-hs-root-to-admin.redirectregex.regex=^https?://([^/]+)/?$$
       - traefik.http.middlewares.redirect-hs-root-to-admin.redirectregex.replacement=https://$${1}/admin
       - traefik.http.middlewares.redirect-hs-root-to-admin.redirectregex.permanent=true
