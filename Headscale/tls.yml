@@ -1,4 +1,8 @@
 # to be placed in traefik dir. 
+# headscale-deploy/
+# ├── docker-compose.yaml
+# ├── traefik/
+# │   └── tls.yaml
 
 tls:
   options:
