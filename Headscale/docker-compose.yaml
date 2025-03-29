@@ -11,7 +11,7 @@ services:
       - ./headscale/data:/var/lib/headscale
     labels:
       - traefik.enable=true
-      - traefik.http.routers.headscale-rtr.rule=Host(`heads.my_domain.com`)
+      - traefik.http.routers.headscale-rtr.rule=Host(`${HS_URL}`) # add actual URL in .env
       - traefik.http.routers.headscale-rtr.priority=90
       - traefik.http.routers.headscale-rtr.entrypoints=websecure
       - traefik.http.routers.headscale-rtr.tls.certresolver=myresolver
@@ -25,7 +25,7 @@ services:
     restart: unless-stopped
     labels:
       - traefik.enable=true
-      - traefik.http.routers.headscale-admin-rtr.rule=Host(`hui.my_domain.com`) && PathPrefix(`/admin`)
+      - traefik.http.routers.headscale-admin-rtr.rule=Host(`${HUI_URL}`) && PathPrefix(`/admin`)
       - traefik.http.routers.headscale-admin-rtr.entrypoints=websecure
       - traefik.http.routers.headscale-admin-rtr.tls.certresolver=myresolver
       - traefik.http.services.headscale-admin-svc.loadbalancer.server.port=80
@@ -45,7 +45,7 @@ services:
     labels:
       - traefik.enable=true
       # Rule to match /admin path on the headscale host
-      - traefik.http.routers.headplane-rtr.rule=Host(`heads.my_domain.com`) && PathPrefix(`/admin`)
+      - traefik.http.routers.headplane-rtr.rule=Host(`${HS_URL}`) && PathPrefix(`/admin`) # add actual URL in .env
       # ADDED: Set priority HIGHER than headscale's router for the same host
       - traefik.http.routers.headplane-rtr.priority=100
       - traefik.http.routers.headplane-rtr.entrypoints=websecure
@@ -63,13 +63,14 @@ services:
       - --log.filePath=/var/log/traefik.log
       - --accesslog=true
       - --log.level=INFO
+      - --ping=true #testing health
       - --api=true
       - --api.dashboard=false
       - --providers.docker
       - --entrypoints.web.address=:80
       - --entrypoints.websecure.address=:443
       - --certificatesresolvers.myresolver.acme.tlschallenge=true
-      - --certificatesresolvers.myresolver.acme.email=letse@my_domain.com
+      - --certificatesresolvers.myresolver.acme.email=${LE_EMAIL} # add actual email in .env
       - --certificatesresolvers.myresolver.acme.storage=/certificates/acme.json
       - --global.sendAnonymousUsage=false
       - --entrypoints.websecure.http.tls.options=securetls@file  # TLS configuration
@@ -86,18 +87,25 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--output-document=/dev/null", "http://127.0.0.1:8080/ping"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+
     labels:
       # CORS middleware for API calls ---
       - traefik.http.middlewares.corsHeader.headers.accesscontrolallowmethods=GET,OPTIONS,PUT
       - traefik.http.middlewares.corsHeader.headers.accesscontrolallowheaders=Authorization,*
-      - traefik.http.middlewares.corsHeader.headers.accesscontrolalloworiginlist=https://hui.my_domain.com,https://heads.my_domain.com
+      - traefik.http.middlewares.corsHeader.headers.accesscontrolalloworiginlist=https://${HUI_URL},https://${HS_URL} # add actual URL in .env
       - traefik.http.middlewares.corsHeader.headers.accesscontrolmaxage=100
       - traefik.http.middlewares.corsHeader.headers.addvaryheader=true
-      # --- Redirect hui.my_domain.com root path (/) to /admin ---
+      # --- Redirect hui.${HUI_URL} root path (/) to /admin ---
       - traefik.http.middlewares.redirect-hui-root-to-admin.redirectregex.regex=^https?://([^/]+)/?$$
       - traefik.http.middlewares.redirect-hui-root-to-admin.redirectregex.replacement=https://$${1}/admin
       - traefik.http.middlewares.redirect-hui-root-to-admin.redirectregex.permanent=true
-      - traefik.http.routers.hui-root-redirect.rule=Host(`hui.my_domain.com`) && Path(`/`)
+      - traefik.http.routers.hui-root-redirect.rule=Host(`${HUI_URL}`) && Path(`/`) # add actual URL in .env
       - traefik.http.routers.hui-root-redirect.entrypoints=websecure
       - traefik.http.routers.hui-root-redirect.tls.certresolver=myresolver
       - traefik.http.routers.hui-root-redirect.middlewares=redirect-hui-root-to-admin@docker
