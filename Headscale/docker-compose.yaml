@@ -94,7 +94,7 @@ services:
       - traefik.http.middlewares.corsHeader.headers.accesscontrolallowmethods=GET,OPTIONS,PUT
       - traefik.http.middlewares.corsHeader.headers.accesscontrolallowheaders=Authorization,*
       - traefik.http.middlewares.corsHeader.headers.accesscontrolalloworiginlist=https://${HUI_URL},https://${HS_URL}
-      - traefik.http.middlewares.corsHeader.headers.accesscontrolmaxage=100
+      - traefik.http.middlewares.corsHeader.headers.accesscontrolmaxage=43200
       - traefik.http.middlewares.corsHeader.headers.addvaryheader=true
 
       # Redirect HUI root path (/) to /admin
