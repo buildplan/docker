@@ -1,0 +1,103 @@
+services:
+
+  headscale:
+    image: headscale/headscale:0.25.1
+    pull_policy: always
+    container_name: headscale
+    restart: unless-stopped
+    command: serve
+    volumes:
+      - ./headscale/config:/etc/headscale
+      - ./headscale/data:/var/lib/headscale
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.headscale-rtr.rule=Host(`heads.change_me.com`)
+      - traefik.http.routers.headscale-rtr.priority=90
+      - traefik.http.routers.headscale-rtr.entrypoints=websecure
+      - traefik.http.routers.headscale-rtr.tls.certresolver=myresolver
+      - traefik.http.services.headscale-svc.loadbalancer.server.port=8080
+      - traefik.http.routers.headscale-rtr.middlewares=corsHeader@docker
+
+  headscale-admin:
+    image: goodieshq/headscale-admin:0.25.5
+    pull_policy: always
+    container_name: headscale-admin
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.headscale-admin-rtr.rule=Host(`hui.change_me.com`) && PathPrefix(`/admin`)
+      - traefik.http.routers.headscale-admin-rtr.entrypoints=websecure
+      - traefik.http.routers.headscale-admin-rtr.tls.certresolver=myresolver
+      - traefik.http.services.headscale-admin-svc.loadbalancer.server.port=80
+      - traefik.http.routers.headscale-admin-rtr.middlewares=corsHeader@docker
+
+  headplane:
+    image: ghcr.io/tale/headplane:0.5.5
+    pull_policy: always
+    container_name: headplane
+    restart: unless-stopped
+    volumes:
+      - ./headplane/config.yaml:/etc/headplane/config.yaml
+      - ./headscale/config:/etc/headscale
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - headscale
+    labels:
+      - traefik.enable=true
+      # Rule to match /admin path on the headscale host
+      - traefik.http.routers.headplane-rtr.rule=Host(`heads.change_me.com`) && PathPrefix(`/admin`)
+      # ADDED: Set priority HIGHER than headscale's router for the same host
+      - traefik.http.routers.headplane-rtr.priority=100
+      - traefik.http.routers.headplane-rtr.entrypoints=websecure
+      - traefik.http.routers.headplane-rtr.tls.certresolver=myresolver
+      - traefik.http.services.headplane-svc.loadbalancer.server.port=3000 # Headplane's internal port
+      # Apply the modified CORS middleware
+      - traefik.http.routers.headplane-rtr.middlewares=corsHeader@docker
+
+  traefik:
+    image: traefik:v3.3.4
+    pull_policy: always
+    restart: unless-stopped
+    container_name: traefik
+    command:
+      - --log.filePath=/var/log/traefik.log
+      - --accesslog=true
+      - --log.level=INFO
+      - --api=true
+      - --api.dashboard=false
+      - --providers.docker
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.myresolver.acme.tlschallenge=true
+      - --certificatesresolvers.myresolver.acme.email=letse@change_me.com
+      - --certificatesresolvers.myresolver.acme.storage=/certificates/acme.json
+      - --global.sendAnonymousUsage=false
+    ports:
+      - 80:80
+      - 443:443
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/certificates:/certificates
+      - ./traefik/logs/traefik.log:/var/log/traefik.log
+    labels:
+      - traefik.http.middlewares.corsHeader.headers.accesscontrolallowmethods=GET,OPTIONS,PUT
+      - traefik.http.middlewares.corsHeader.headers.accesscontrolallowheaders=Authorization,*
+      - traefik.http.middlewares.corsHeader.headers.accesscontrolalloworiginlist=https://hui.change_me.com,https://heads.change_me.com
+      - traefik.http.middlewares.corsHeader.headers.accesscontrolmaxage=100
+      - traefik.http.middlewares.corsHeader.headers.addvaryheader=true
+
+      # --- Redirect hui.change_me.com root path (/) to /admin ---
+      - traefik.http.middlewares.redirect-hui-root-to-admin.redirectregex.regex=^https?://([^/]+)/?$$
+      - traefik.http.middlewares.redirect-hui-root-to-admin.redirectregex.replacement=https://$${1}/admin
+      - traefik.http.middlewares.redirect-hui-root-to-admin.redirectregex.permanent=true
+      - traefik.http.routers.hui-root-redirect.rule=Host(`hui.change_me.com`) && Path(`/`)
+      - traefik.http.routers.hui-root-redirect.entrypoints=websecure
+      - traefik.http.routers.hui-root-redirect.tls.certresolver=myresolver
+      - traefik.http.routers.hui-root-redirect.middlewares=redirect-hui-root-to-admin@docker
+
+      # --- Global Redirect HTTP to HTTPS ---
+      - traefik.http.routers.http-catchall.rule=hostregexp(`{host:.+}`)
+      - traefik.http.routers.http-catchall.entrypoints=web
+      - traefik.http.routers.http-catchall.middlewares=redirect-to-https@docker
+      - traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https
+      - traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true
