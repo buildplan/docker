@@ -22,6 +22,14 @@ services:
     pull_policy: always
     container_name: headplane
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
     volumes:
       - ./headplane/config.yaml:/etc/headplane/config.yaml  # Configuration for Headplane
       - ./headscale/config:/etc/headscale  # Shared Headscale configuration
@@ -79,11 +87,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.50'
           memory: 512M
+          cpus: '0.50'
         reservations:
-          cpus: '0.25'
           memory: 128M
+          cpus: '0.25'
     labels:
       # CORS middleware for API calls
       - traefik.http.middlewares.corsHeader.headers.accesscontrolallowmethods=GET,OPTIONS,PUT
