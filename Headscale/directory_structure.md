@@ -1,0 +1,23 @@
+
+headscale-deploy/
+|
+├── .env (environment variables URLs, Email)
+├── docker-compose.yaml
+├── headscale/
+│   └── data/ (for headscale db)
+|   └── config/
+|   |   └── config.yaml (headscale config file)
+├── traefik/
+│   └── logs/
+|   |   └── traefik.log (this will be created by traefik)
+|   └── /certificates
+|   |   └── acme.json (`touch acme.json && chmod +x acme.json`)
+|   └── tls.yml                  (Custom TLS options configuration file)
+|   └── /auth (optional for testing traefik auth)
+|   |   └── users.htpasswd
+├── headplane/
+│   └── config.yaml
+|   └── users/
+|   |   └── users.json (set permissions witchmod +x 600)
+|   └── secrets/
+|       └── oidc_client_secret (Contains OICD secret from google set permissions with chmod +x 600)
