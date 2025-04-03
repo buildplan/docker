@@ -393,5 +393,3 @@ LE_EMAIL=your-email@example.com
                 # Content Security Policy (CSP)
                 - traefik.http.middlewares.cspHeader.headers.customresponseheaders.Content-Security-Policy="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'"
 ```
-
-Can you update the README with this?
