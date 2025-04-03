@@ -1,22 +1,32 @@
-# headscale-deploy/
-# |
-# ├── .env     (environment variables URLs, Email)
-# ├── docker-compose.yaml
-# ├── headscale/
-# │   └── data/  (for headscale db)
-# |   └── config/
-# |   |   └── config.yaml (headscale config file)
-# ├── traefik/
-# │   └── logs/
-# |   |   └── traefik.log (this will be created by traefik)
-# |   └── /certificates
-# |   |   └── acme.json   (`touch acme.json && chmod +x acme.json`)
-# |   └── tls.yml         (Custom TLS options configuration file)
-# |   └── /auth (optional for testing traefik auth)
-# |   |   └── users.htpasswd
-# ├── headplane/
-# │   └── config.yaml
-# |   └── users/
-# |   |   └── users.json (set permissions witchmod +x 600)
-# |   └── secrets/
-# |       └── oidc_client_secret (Contains OICD secret from google set permissions with chmod +x 600)
+headscale-deploy/
+├── .env                     # Environment variables (URLs, Email, potentially secrets/tokens)
+├── docker-compose.yaml      # Main orchestration file
+│
+├── headscale/
+│   ├── config/
+│   │   └── config.yaml      # Headscale configuration
+│   └── data/                # for db files
+│
+├── traefik/
+│   ├── config/
+│   │   ├── traefik.yml      # Optional: Traefik static configuration (entrypoints, providers)
+│   │   ├── dynamic/         # Directory mounted for Traefik dynamic configuration
+│   │   │   └── tls.yml      # Custom TLS options (dynamic config)
+│   │   │   └── auth.yml     # Optional: Auth middleware definitions (dynamic config)
+│   │   └── auth/            # Authentication credentials
+│   │       └── users.htpasswd # Basic auth users (chmod 600 or 640 recommended)
+│   ├── data/                # Persistent state data for Traefik
+│   │   └── certificates/
+│   │       └── acme.json    # Let's Encrypt certificates (MUST chmod 600)
+│   └── logs/
+│       └── traefik.log      # Traefik access/service logs
+│       └── access.log       # Optional: Separate access log if configured
+│
+└── headplane/
+    ├── config/
+    │   └── config.yaml      # Headplane configuration
+    ├── data/
+    │   └── users/
+    │       └── users.json   # Headplane user data (chmod 600 or 640 recommended)
+    └── secrets/             # Sensitive credentials
+        └── oidc_client_secret # OIDC secret (chmod 600 recommended)
