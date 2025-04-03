@@ -39,7 +39,6 @@ headscale-deploy/
 * **`headscale-deploy/headplane/secrets/oidc_client_secret`**
     * Contains the OIDC client secret (e.g., from Google).
     * **Sensitive** - Recommend `chmod 600`.
-    * Should NOT be committed to Git.
 * **`headscale-deploy/headplane/users/`**
     * Directory for Headplane user data.
 * **`headscale-deploy/headplane/users/users.json`**
