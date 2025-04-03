@@ -1,17 +1,17 @@
 # headscale-deploy/
 # |
-# ├── .env (environment variables URLs, Email)
+# ├── .env     (environment variables URLs, Email)
 # ├── docker-compose.yaml
 # ├── headscale/
-# │   └── data/ (for headscale db)
+# │   └── data/  (for headscale db)
 # |   └── config/
 # |   |   └── config.yaml (headscale config file)
 # ├── traefik/
 # │   └── logs/
 # |   |   └── traefik.log (this will be created by traefik)
 # |   └── /certificates
-# |   |   └── acme.json (`touch acme.json && chmod +x acme.json`)
-# |   └── tls.yml                  (Custom TLS options configuration file)
+# |   |   └── acme.json   (`touch acme.json && chmod +x acme.json`)
+# |   └── tls.yml         (Custom TLS options configuration file)
 # |   └── /auth (optional for testing traefik auth)
 # |   |   └── users.htpasswd
 # ├── headplane/
