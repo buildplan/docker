@@ -127,7 +127,7 @@ LE_EMAIL=your-email@example.com
 
 ###   1.  Headscale (`headscale/config/config.yaml`)
 
-    Create this file. You need to configure at least the `server_url` and `listen_addr`. Refer to the [official Headscale sample config](https://github.com/juanfont/headscale/blob/main/config-example.yaml) for all options.
+Create this file. You need to configure at least the `server_url` and `listen_addr`. Refer to the [official Headscale sample config](https://github.com/juanfont/headscale/blob/main/config-example.yaml) for all options.
 
     **Minimal Example:**
 
