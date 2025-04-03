@@ -76,10 +76,3 @@ headscale-deploy/
     * Should likely NOT be committed to Git.
 * **`headscale-deploy/traefik/tls.yml`**
     * Traefik dynamic configuration file, often used for custom TLS options, cipher suites, etc.
-
-**General Recommendations:**
-
-1.  **`.gitignore`:** Create a `.gitignore` file in the `headscale-deploy/` root to prevent committing sensitive files and generated data (list provided in the previous response).
-2.  **File Permissions:** Ensure strict file permissions are set (`chmod 600` for secrets/keys like `acme.json`, `oidc_client_secret`; `600` or `640` for user data/configs like `users.json`, `users.htpasswd`).
-3.  **`README.md`:** Add a `README.md` file in the root directory to document setup, configuration, environment variables, and usage.
-4.  **Backups:** Remember to regularly back up critical persistent data, especially `headscale/data/` and `traefik/certificates/acme.json`.
