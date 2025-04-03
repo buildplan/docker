@@ -1,17 +1,11 @@
-# Goes in headplane dir. 
-# headscale-deploy/
-# ├── docker-compose.yaml
-# ├── headplane/
-# │   └── config.yaml
-
 server:
   host: "0.0.0.0"
   port: 3000
-  cookie_secret: "16151413121110090807060504030201" # Change this with 32 character hash, use 'openssl rand -hex 16'
+  cookie_secret: "e919exxxxxxxxxxxxxxxxxxxxx" # Change this!
   cookie_secure: true
 
 headscale:
-  url: "http://headscale:8080" # internal docker url - do not change. 
+  url: "https://heads.example.com"  # change this
   config_path: "/etc/headscale/config.yaml"
   config_strict: true
 
@@ -27,3 +21,14 @@ integration:
     pod_name: "headscale"
   proc:
     enabled: false
+
+# OIDC Configuration
+oidc:
+  issuer: "https://accounts.google.com"
+  client_id: "147852369xxxxxxxxxxxxxxxxxxxxxxxxxxapps.googleusercontent.com" # change this
+  client_secret_path: "/etc/headplane/secrets/oidc_client_secret" # container internal path mounted in docker-compose
+  disable_api_key_login: false
+  token_endpoint_auth_method: "client_secret_post"
+  headscale_api_key: "O-0000000000000000000000000000" # change this
+  redirect_uri: "https://heads.alisufyan.cloud/admin/oidc/callback"
+  user_storage_file: "/var/lib/headplane/users.json"
