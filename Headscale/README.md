@@ -166,7 +166,7 @@ Create this file. You need to configure at least the `server_url` and `listen_ad
 
 ###   2.  Headplane (`headplane/config.yaml`)
 
-    Create this file to configure the Headplane UI.
+   Create this file to configure the Headplane UI.
 
     ```yaml
     # headplane/config.yaml
@@ -216,7 +216,7 @@ Create this file. You need to configure at least the `server_url` and `listen_ad
 
 ###   3.  Docker Compose (`docker-compose.yaml`)
 
-    This file in the root of your `headscale-deploy` directory defines all the services and their interactions. It uses environment variables for domain names and email and includes a `secureHeaders` middleware and TLS options.
+This file in the root of your `headscale-deploy` directory defines all the services and their interactions. It uses environment variables for domain names and email and includes a `secureHeaders` middleware and TLS options.
 
     ```yaml
     version: "3.8" # Or a compatible version
