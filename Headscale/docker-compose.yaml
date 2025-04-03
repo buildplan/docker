@@ -17,41 +17,56 @@ services:
       - traefik.http.services.headscale-svc.loadbalancer.server.port=8080  # Port for Headscale service
       - traefik.http.routers.headscale-rtr.middlewares=corsHeader@docker,secureHeaders@docker,cspHeader@docker  # Apply CSP
 
-  headscale-admin:
-    image: goodieshq/headscale-admin:0.25.5  # Specifies the version of Headscale Admin
-    pull_policy: always
-    container_name: headscale-admin
-    restart: unless-stopped
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.headscale-admin-rtr.rule=Host(`${HUI_URL}`) && PathPrefix(`/admin`)  # URL and path for Headscale Admin - add in .env
-      - traefik.http.routers.headscale-admin-rtr.entrypoints=websecure
-      - traefik.http.routers.headscale-admin-rtr.tls.certresolver=myresolver
-      - traefik.http.services.headscale-admin-svc.loadbalancer.server.port=80  # Port for Headscale Admin service
-      - traefik.http.routers.headscale-admin-rtr.middlewares=corsHeader@docker,secureHeaders@docker,cspHeader@docker  # Apply CSP
-
   headplane:
-    image: ghcr.io/tale/headplane:0.5.5  # Specifies the version of Headplane
+    image: ghcr.io/tale/headplane:0.5.7  # Specifies the version of Headplane
     pull_policy: always
     container_name: headplane
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
     volumes:
       - ./headplane/config.yaml:/etc/headplane/config.yaml  # Configuration for Headplane
       - ./headscale/config:/etc/headscale  # Shared Headscale configuration
       - /var/run/docker.sock:/var/run/docker.sock:ro  # Docker socket for container management
+      - ./headplane/users/users.json:/var/lib/headplane/users.json # Persist user storage file
+      - ./headplane/secrets/oidc_client_secret:/etc/headplane/secrets/oidc_client_secret:ro # OICD Secret via File Mounts
     depends_on:
       - headscale  # Ensure Headscale starts before Headplane
     labels:
       - traefik.enable=true
-      - traefik.http.routers.headplane-rtr.rule=Host(`${HS_URL}`) && PathPrefix(`/admin`)  # URL and path for Headplane
+      # Router Definition 
+      - traefik.http.routers.headplane-rtr.rule=Host(`${HS_URL}`) && PathPrefix(`/admin`)
       - traefik.http.routers.headplane-rtr.priority=100
       - traefik.http.routers.headplane-rtr.entrypoints=websecure
       - traefik.http.routers.headplane-rtr.tls.certresolver=myresolver
-      - traefik.http.services.headplane-svc.loadbalancer.server.port=3000  # Port for Headplane service
-      - traefik.http.routers.headplane-rtr.middlewares=corsHeader@docker,secureHeaders@docker,cspHeader@docker  # Apply CSP
+      - traefik.http.services.headplane-svc.loadbalancer.server.port=3000 # headplane port
+      # ---- Middleware for redirect ----
+      - traefik.http.middlewares.headplane-addslash.redirectregex.regex=^https?://([^/]+)/admin$$
+      - traefik.http.middlewares.headplane-addslash.redirectregex.replacement=https://$${1}/admin/
+      - traefik.http.middlewares.headplane-addslash.redirectregex.permanent=true
+      - traefik.http.routers.headplane-rtr.middlewares=headplane-addslash@docker,corsHeader@docker,secureHeaders@docker,cspHeader@docker
+
+  headscale-admin:
+    image: goodieshq/headscale-admin:0.25.5
+    container_name: headscale-admin
+    restart: unless-stopped
+    pull_policy: always # Or your preferred policy
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.headscale-admin-extra-rtr.rule=Host(`${HUI_URL}`) # .env for HUI_URL
+      - traefik.http.routers.headscale-admin-extra-rtr.entrypoints=websecure
+      - traefik.http.routers.headscale-admin-extra-rtr.tls.certresolver=myresolver
+      - traefik.http.services.headscale-admin-extra-svc.loadbalancer.server.port=80 # headscale-admin port
+      - traefik.http.routers.headscale-admin-extra-rtr.middlewares=corsHeader@docker
 
   traefik:
-    image: traefik:v3.3.4  # Specifies the version of Traefik to use
+    image: traefik:v3.3.5 # latest traefik March 2025
     pull_policy: always
     restart: unless-stopped
     container_name: traefik
@@ -78,7 +93,7 @@ services:
       - ./traefik/certificates:/certificates
       - ./traefik/logs/traefik.log:/var/log/traefik.log
       - ./traefik/tls.yml:/tls.yml # Custom TLS
-    logging:
+    logging: # Limit logs
       driver: "json-file"
       options:
         max-size: "10m"
@@ -89,24 +104,23 @@ services:
       timeout: 3s
       retries: 3
       start_period: 20s
+    deploy: # Limit resource usage
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.50'
+        reservations:
+          memory: 128M
+          cpus: '0.25'
     labels:
       # CORS middleware for API calls
       - traefik.http.middlewares.corsHeader.headers.accesscontrolallowmethods=GET,OPTIONS,PUT
       - traefik.http.middlewares.corsHeader.headers.accesscontrolallowheaders=Authorization,*
-      - traefik.http.middlewares.corsHeader.headers.accesscontrolalloworiginlist=https://${HUI_URL},https://${HS_URL}
+      - traefik.http.middlewares.corsHeader.headers.accesscontrolalloworiginlist=https://${HS_URL},https://${HUI_URL}
       - traefik.http.middlewares.corsHeader.headers.accesscontrolmaxage=43200
       - traefik.http.middlewares.corsHeader.headers.addvaryheader=true
 
-      # Redirect HUI root path (/) to /admin
-      - traefik.http.middlewares.redirect-hui-root-to-admin.redirectregex.regex=^https?://([^/]+)/?$$
-      - traefik.http.middlewares.redirect-hui-root-to-admin.redirectregex.replacement=https://$${1}/admin
-      - traefik.http.middlewares.redirect-hui-root-to-admin.redirectregex.permanent=true
-      - traefik.http.routers.hui-root-redirect.rule=Host(`${HUI_URL}`) && Path(`/`)
-      - traefik.http.routers.hui-root-redirect.entrypoints=websecure
-      - traefik.http.routers.hui-root-redirect.tls.certresolver=myresolver
-      - traefik.http.routers.hui-root-redirect.middlewares=redirect-hui-root-to-admin@docker,secureHeaders@docker,cspHeader@docker  # Apply CSP
-
-      # Redirect HS root path (/) to /admin
+      # Redirect HS root path (/) to /admin (Now served by headplane)
       - traefik.http.middlewares.redirect-hs-root-to-admin.redirectregex.regex=^https?://([^/]+)/?$$
       - traefik.http.middlewares.redirect-hs-root-to-admin.redirectregex.replacement=https://$${1}/admin
       - traefik.http.middlewares.redirect-hs-root-to-admin.redirectregex.permanent=true
@@ -116,6 +130,16 @@ services:
       - traefik.http.routers.hs-root-redirect.tls.certresolver=myresolver
       - traefik.http.routers.hs-root-redirect.middlewares=redirect-hs-root-to-admin@docker,secureHeaders@docker,cspHeader@docker  # Apply CSP
       - traefik.http.routers.hs-root-redirect.service=noop@internal
+
+      # ---- REDIRECT FOR HUI - Headsscale-admin ----
+      - traefik.http.middlewares.redirect-hui-root-to-admin.redirectregex.regex=^https?://${HUI_URL}/?$$
+      - traefik.http.middlewares.redirect-hui-root-to-admin.redirectregex.replacement=https://${HUI_URL}/admin
+      - traefik.http.middlewares.redirect-hui-root-to-admin.redirectregex.permanent=true
+      - traefik.http.routers.hui-root-redirect.rule=Host(`${HUI_URL}`) && Path(`/`)
+      - traefik.http.routers.hui-root-redirect.entrypoints=websecure
+      - traefik.http.routers.hui-root-redirect.tls.certresolver=myresolver
+      - traefik.http.routers.hui-root-redirect.service=noop@internal
+      - traefik.http.routers.hui-root-redirect.middlewares=redirect-hui-root-to-admin@docker,secureHeaders@docker # add secureHeaders@docker etc
 
       # HSTS Security Headers
       - traefik.http.middlewares.secureHeaders.headers.stsSeconds=31536000 # 1 year
