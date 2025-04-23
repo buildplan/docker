@@ -2,6 +2,7 @@
 
 # --- Configuration File for Docker Container Monitor Script ---
 # --- Default Settings (can be overridden by environment variables) ---
+# --- docker ps -a --format '{{.Names}}' for container names --- 
 
 # Log settings
 LOG_LINES_TO_CHECK="${LOG_LINES_TO_CHECK:-20}"        # Default: 20 lines, can be set via ENV: LOG_LINES_TO_CHECK
