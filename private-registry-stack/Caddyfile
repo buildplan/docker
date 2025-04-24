@@ -1,0 +1,28 @@
+{
+	email user@mydomain.com
+}
+
+# --- Registry API Block ---
+registry.mydomain.com {
+	basic_auth {
+		user password_hash_goes_here
+	}
+
+	reverse_proxy registry:5000
+}
+
+# --- UI Block ---
+ui.registry.mydomain.com {
+	basic_auth {
+		reg_user password_hash_goes_here
+	}
+	reverse_proxy registry_ui:80
+
+	header {
+		Strict-Transport-Security "max-age=31536000;"
+		X-Frame-Options "SAMEORIGIN"
+		X-Content-Type-Options "nosniff"
+		X-XSS-Protection "1; mode=block"
+		# Content-Security-Policy "default-src 'self';"
+	}
+}
