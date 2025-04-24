@@ -23,6 +23,6 @@ ui.registry.mydomain.com {
 		X-Frame-Options "SAMEORIGIN"
 		X-Content-Type-Options "nosniff"
 		X-XSS-Protection "1; mode=block"
-		# Content-Security-Policy "default-src 'self';"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; form-action 'self'; frame-ancestors 'none';"
 	}
 }
