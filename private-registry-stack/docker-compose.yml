@@ -67,7 +67,7 @@ services:
       NGINX_PROXY_PASS_URL: "http://registry:5000"
       DELETE_IMAGES: "true"
       SINGLE_REGISTRY: "true"
-      REGISTRY_TITLE: "alisufyan.cloud"
+      REGISTRY_TITLE: "SOME_TITLE" # change this
       PULL_URL: "registry.alisufyan.cloud"
       THEME: "dark"
       THEME_PRIMARY_TEXT: "#e5e7eb"
