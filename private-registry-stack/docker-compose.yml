@@ -3,7 +3,7 @@ services:
   # --- registry ---
   registry:
     image: registry:3.0.0
-    container_name: private_registry_service
+    container_name: registry_service
     networks:
       - registry-net
     volumes:
@@ -24,6 +24,7 @@ services:
           cpus: '0.5'
           memory: 1G
 
+
   # --- proxy ---
   caddy:
     image: caddy:2.10.0
@@ -40,6 +41,8 @@ services:
     restart: unless-stopped
     depends_on:
       - registry
+      - registry-ui
+      - portainer
     logging:
       driver: "json-file"
       options:
@@ -49,7 +52,8 @@ services:
       resources:
         limits:
           cpus: '0.25'
-          memory: 256M
+          memory: 512M
+
 
   # --- ui ---
   registry-ui:
@@ -57,11 +61,26 @@ services:
     container_name: registry_ui
     networks:
       - registry-net
+    depends_on:
+      - registry
     environment:
       NGINX_PROXY_PASS_URL: "http://registry:5000"
       DELETE_IMAGES: "true"
       SINGLE_REGISTRY: "true"
-      REGISTRY_TITLE: "Private Docker Registry"
+      REGISTRY_TITLE: "alisufyan.cloud"
+      PULL_URL: "registry.alisufyan.cloud"
+      THEME: "dark"
+      THEME_PRIMARY_TEXT: "#e5e7eb"
+      THEME_NEUTRAL_TEXT: "#6b7280"
+      THEME_BACKGROUND: "#111827"
+      THEME_HOVER_BACKGROUND: "#1f2937"
+      THEME_ACCENT_TEXT: "#14b8a6"
+      THEME_HEADER_TEXT: "#e5e7eb"
+      THEME_HEADER_ACCENT_TEXT: "#5eead4"
+      THEME_HEADER_BACKGROUND: "#1f2937"
+      THEME_FOOTER_TEXT: "#e5e7eb"
+      THEME_FOOTER_NEUTRAL_TEXT: "#9ca3af"
+      THEME_FOOTER_BACKGROUND: "#1f2937"
     logging:
       driver: "json-file"
       options:
@@ -73,6 +92,75 @@ services:
         limits:
           cpus: '0.25'
           memory: 256M
+
+
+  # --- REGSYNC SERVICE ---
+  regsync:
+    image: ghcr.io/regclient/regsync:v0.8.3
+    container_name: regsync_service
+    command: ["-c", "/config/regsync.yml", "server"]
+    volumes:
+      - ./regsync.yml:/config/regsync.yml:ro
+      - ./secrets:/secrets:ro
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 256M
+    networks:
+      - registry-net
+
+
+  # --- REGBOT SERVICE ---
+  regbot:
+    image: ghcr.io/regclient/regbot:v0.8.3
+    container_name: regbot_service
+    command: ["-c", "/config/regbot.yml", "server"]
+    volumes:
+      - ./regbot.yml:/config/regbot.yml:ro
+      - ./secrets:/secrets:ro
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+    networks:
+      - registry-net
+
+
+  # --- Portainer Service ---
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./portainer_data:/data
+    networks:
+      - registry-net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 256M
+
 
 networks:
   registry-net:
