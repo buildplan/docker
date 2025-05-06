@@ -10,7 +10,7 @@ LOG_DIR="/home/n2ali/private-registry-setup/logs"
 GOTIFY_TOKEN_FILE="${SECRETS_DIR}/gotify_token"
 
 # --- MODIFIED: Read Gotify URL from secrets file ---
-GOTIFY_URL_SECRET_FILE="${SECRETS_DIR}/gotify_url_secret" # Expected content: https://goti.alisufyan.cloud
+GOTIFY_URL_SECRET_FILE="${SECRETS_DIR}/gotify_url_secret" # Expected content: https://goti.mydomain.cloud
 if [[ -f "${GOTIFY_URL_SECRET_FILE}" ]]; then
     GOTIFY_URL=$(cat "${GOTIFY_URL_SECRET_FILE}")
 else
@@ -21,7 +21,7 @@ fi
 
 # --- MODIFIED: Read the private registry identifier from a single secrets file ---
 # This identifier MUST EXACTLY MATCH the 'registry:' field in your regsync.yml for your private registry.
-PRIVATE_REGISTRY_IDENTIFIER_FILE="${SECRETS_DIR}/private_registry_identifier" # Expected content: registry.alisufyan.cloud
+PRIVATE_REGISTRY_IDENTIFIER_FILE="${SECRETS_DIR}/private_registry_identifier" # Expected content: registry.mydomain.cloud
 if [[ -f "${PRIVATE_REGISTRY_IDENTIFIER_FILE}" ]]; then
     PRIVATE_REGISTRY_ID_FROM_SECRET=$(cat "${PRIVATE_REGISTRY_IDENTIFIER_FILE}")
 else
@@ -76,7 +76,7 @@ send_gotify() {
 
 # Function to perform non-interactive login using secrets
 perform_login() {
-    local registry_host_from_yaml="$1" # This is the value from regsync.yml, e.g., "registry.alisufyan.cloud"
+    local registry_host_from_yaml="$1" # This is the value from regsync.yml, e.g., "registry.mydomain.cloud"
     local user_file pass_file username password
     log "Attempting non-interactive login to [$registry_host_from_yaml] using secrets..."
     local login_host_for_docker_cli="$registry_host_from_yaml" # Usually the same, but can be overridden (e.g. docker.io)
