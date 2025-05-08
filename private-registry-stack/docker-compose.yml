@@ -1,29 +1,32 @@
-services:
+networks:
+  registry-net:
+    driver: bridge
 
+services:
   # --- registry ---
   registry:
     image: registry:3.0.0
     container_name: registry_service
-    networks:
-      - registry-net
     volumes:
       - ./docker-registry/data:/var/lib/registry
+    networks:
+      - registry-net
     environment:
       REGISTRY_STORAGE_DELETE_ENABLED: "true"
       OTEL_TRACES_EXPORTER: "none"
       REGISTRY_LOG_LEVEL: "info"
+      REGISTRY_HTTP_SECRET: ${REGISTRY_HTTP_SECRET}
     restart: unless-stopped
     logging:
       driver: "json-file"
       options:
-        max-size: "5m"
-        max-file: "3"
+        max-size: "10m"
+        max-file: "5"
     deploy:
       resources:
         limits:
           cpus: '0.5'
           memory: 1G
-
 
   # --- proxy ---
   caddy:
@@ -32,17 +35,19 @@ services:
     ports:
       - "80:80"
       - "443:443"
-    networks:
-      - registry-net
     volumes:
-      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile
       - ./caddy/data:/data
       - ./caddy/config:/config
+    networks:
+      - registry-net
     restart: unless-stopped
     depends_on:
       - registry
       - registry-ui
       - portainer
+      - prometheus
+      - grafana
     logging:
       driver: "json-file"
       options:
@@ -53,7 +58,6 @@ services:
         limits:
           cpus: '0.25'
           memory: 512M
-
 
   # --- ui ---
   registry-ui:
@@ -67,8 +71,8 @@ services:
       NGINX_PROXY_PASS_URL: "http://registry:5000"
       DELETE_IMAGES: "true"
       SINGLE_REGISTRY: "true"
-      REGISTRY_TITLE: "SOME_TITLE" # change this
-      PULL_URL: ${PULL_URL} # add in .env
+      REGISTRY_TITLE: ${REGISTRY_TITLE}
+      PULL_URL: ${PULL_URL}
       THEME: "dark"
       THEME_PRIMARY_TEXT: "#e5e7eb"
       THEME_NEUTRAL_TEXT: "#6b7280"
@@ -102,6 +106,8 @@ services:
     volumes:
       - ./regsync.yml:/config/regsync.yml:ro
       - ./secrets:/secrets:ro
+    networks:
+      - registry-net
     logging:
       driver: "json-file"
       options:
@@ -113,9 +119,6 @@ services:
         limits:
           cpus: '0.50'
           memory: 256M
-    networks:
-      - registry-net
-
 
   # --- REGBOT SERVICE ---
   regbot:
@@ -125,6 +128,8 @@ services:
     volumes:
       - ./regbot.yml:/config/regbot.yml:ro
       - ./secrets:/secrets:ro
+    networks:
+      - registry-net
     logging:
       driver: "json-file"
       options:
@@ -136,9 +141,6 @@ services:
         limits:
           cpus: '0.25'
           memory: 256M
-    networks:
-      - registry-net
-
 
   # --- Portainer Service ---
   portainer:
@@ -161,7 +163,50 @@ services:
           cpus: '0.50'
           memory: 256M
 
+  # --- Prometheus Service ---
+  prometheus:
+    image: prom/prometheus:v3.3.1
+    container_name: prometheus
+    restart: unless-stopped
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.listen-address=:9090'
+    # ports:
+      # - "9090:9090"
+    networks:
+      - registry-net
+    logging:
+      driver: "json-file"
+      options: { max-size: "10m", max-file: "3" }
+    deploy:
+      resources:
+        limits: { cpus: '0.50', memory: 512M }
 
-networks:
-  registry-net:
-    driver: bridge
+  # --- Grafana Service ---
+  grafana:
+    image: grafana/grafana:12.0.0
+    container_name: grafana
+    restart: unless-stopped
+    # ports:
+      # - "3000:3000"
+    volumes:
+      - ./grafana/grafana-data:/var/lib/grafana
+      - ./grafana/grafana-config:/etc/grafana
+      - ./grafana/grafana-logs:/var/log/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_SECURITY_ADMIN_PASSWORD}
+      - GF_SERVER_ROOT_URL=${GF_SERVER_ROOT_URL}
+    networks:
+      - registry-net
+    logging:
+      driver: "json-file"
+      options: { max-size: "10m", max-file: "3" }
+    deploy:
+      resources:
+        limits: { cpus: '0.50', memory: 512M }
