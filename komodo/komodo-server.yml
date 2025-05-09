@@ -1,3 +1,13 @@
+################################
+# 🦎 KOMODO COMPOSE - MONGO 🦎 #
+################################
+
+## This compose file will deploy:
+##   1. MongoDB
+##   2. Komodo Core
+##   3. Komodo Periphery
+## Deatils at: https://github.com/moghtech/komodo/blob/main/compose/mongo.compose.yaml
+
 services:
   mongo:
     image: mongo
