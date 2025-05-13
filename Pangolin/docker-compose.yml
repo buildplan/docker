@@ -1,0 +1,109 @@
+name: pangolin
+networks:
+  default:
+    driver: bridge
+    name: pangolin
+services:
+  crowdsec:
+    command: -t
+    container_name: crowdsec
+    environment:
+      ACQUIRE_FILES: /var/log/traefik/*.log
+      COLLECTIONS: crowdsecurity/traefik crowdsecurity/appsec-virtual-patching crowdsecurity/appsec-generic-rules crowdsecurity/linux
+      ENROLL_INSTANCE_NAME: pangolin-crowdsec
+      ENROLL_TAGS: docker
+      GID: "1000"
+      PARSERS: crowdsecurity/whitelists
+    expose:
+      - 6060
+      - 8080
+    healthcheck:
+      test:
+        - CMD
+        - cscli
+        - capi
+        - status
+    image: crowdsecurity/crowdsec:latest
+    labels:
+      - traefik.enable=false
+    ports:
+      - 6060:6060
+      - 8080:8080
+    restart: unless-stopped
+    volumes:
+      - ./config/crowdsec:/etc/crowdsec
+      - ./config/crowdsec/db:/var/lib/crowdsec/data
+      - /var/log/auth.log:/var/log/auth.log:ro
+      - /var/log/syslog:/var/log/syslog:ro
+      - ./config/crowdsec_logs:/var/log
+      - ./config/traefik/logs:/var/log/traefik
+      - /var/log/crowdsec/auth.log:/var/log/host-auth.log:ro
+      - /var/log/ufw.log:/var/log/host/ufw.log:ro
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  gerbil:
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    command:
+      - --reachableAt=http://gerbil:3003
+      - --generateAndSaveKeyTo=/var/config/key
+      - --remoteConfig=http://pangolin:3001/api/v1/gerbil/get-config
+      - --reportBandwidthTo=http://pangolin:3001/api/v1/gerbil/receive-bandwidth
+    container_name: gerbil
+    depends_on:
+      pangolin:
+        condition: service_healthy
+    image: fosrl/gerbil:1.0.0
+    ports:
+      - 51820:51820/udp
+      - 443:443
+      - 80:80
+      - 8085:8082 # traefik internal port
+    restart: unless-stopped
+    volumes:
+      - ./config/:/var/config
+
+  pangolin:
+    container_name: pangolin
+    healthcheck:
+      interval: 3s
+      retries: 5
+      test:
+        - CMD
+        - curl
+        - -f
+        - http://localhost:3001/api/v1/
+      timeout: 3s
+    image: fosrl/pangolin:1.3.2
+    restart: unless-stopped
+    volumes:
+      - ./config:/app/config
+
+  traefik:
+    command:
+      - --configFile=/etc/traefik/traefik_config.yml
+    container_name: traefik
+    depends_on:
+      pangolin:
+        condition: service_healthy
+    image: traefik:v3.4.0
+    network_mode: service:gerbil
+    restart: unless-stopped
+    volumes:
+      - ./config/traefik:/etc/traefik:ro
+      - ./config/letsencrypt:/letsencrypt
+      - ./config/traefik/logs:/var/log/traefik
+      - ./config/traefik/ip2location-db/traefik_ip2location_data:/data/ip2database
+      - ./config/traefik/ip2location-db/IP2LOCATION-LITE-DB1.IPV6.BIN:/plugins-storage/IP2LOCATION-LITE-DB1.IPV6.BIN:ro
+      - ./config/traefik/logs/geoblock:/var/log/geoblock
+      - ./config/traefik/middleware-manager-rules:/etc/traefik/middleware-manager-rules:ro
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
