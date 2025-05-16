@@ -1,13 +1,14 @@
 services:
+  ## -- headscale --
   headscale:
-    image: headscale/headscale:0.25.1  # Specifies the version of Headscale to use
+    image: headscale/headscale:0.25.1
     pull_policy: always
     container_name: headscale
     restart: unless-stopped
     command: serve
     volumes:
-      - ./headscale/config:/etc/headscale  # Configuration files for Headscale
-      - ./headscale/data:/var/lib/headscale  # Data storage for Headscale
+      - ./headscale/config:/etc/headscale
+      - ./headscale/data:/var/lib/headscale
     labels:
       - traefik.enable=true
       - traefik.http.routers.headscale-rtr.rule=Host(`${HS_URL}`)  # URL for accessing Headscale - add in .env
@@ -17,8 +18,9 @@ services:
       - traefik.http.services.headscale-svc.loadbalancer.server.port=8080  # Port for Headscale service
       - traefik.http.routers.headscale-rtr.middlewares=corsHeader@docker,secureHeaders@docker,cspHeader@docker  # Apply CSP
 
+  ## -- headplane --
   headplane:
-    image: ghcr.io/tale/headplane:0.5.7  # Specifies the version of Headplane
+    image: ghcr.io/tale/headplane:next
     pull_policy: always
     container_name: headplane
     restart: unless-stopped
@@ -31,42 +33,62 @@ services:
           cpus: '0.25'
           memory: 128M
     volumes:
-      - ./headplane/config.yaml:/etc/headplane/config.yaml  # Configuration for Headplane
-      - ./headscale/config:/etc/headscale  # Shared Headscale configuration
-      - /var/run/docker.sock:/var/run/docker.sock:ro  # Docker socket for container management
-      - ./headplane/users/users.json:/var/lib/headplane/users.json # Persist user storage file
-      - ./headplane/secrets/oidc_client_secret:/etc/headplane/secrets/oidc_client_secret:ro # OICD Secret via File Mounts
+      - ./headplane/config.yaml:/etc/headplane/config.yaml
+      - ./headscale/config:/etc/headscale
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./headplane:/var/lib/headplane
     depends_on:
-      - headscale  # Ensure Headscale starts before Headplane
+      - headscale
     labels:
       - traefik.enable=true
       # Router Definition 
       - traefik.http.routers.headplane-rtr.rule=Host(`${HS_URL}`) && PathPrefix(`/admin`)
-      - traefik.http.routers.headplane-rtr.priority=100
+      - traefik.http.routers.headplane-rtr.priority=100 # sets priority over base-domain
       - traefik.http.routers.headplane-rtr.entrypoints=websecure
       - traefik.http.routers.headplane-rtr.tls.certresolver=myresolver
       - traefik.http.services.headplane-svc.loadbalancer.server.port=3000 # headplane port
-      # ---- Middleware for redirect ----
+      # ---- Middleware for redirect base domain to /admin ----
       - traefik.http.middlewares.headplane-addslash.redirectregex.regex=^https?://([^/]+)/admin$$
       - traefik.http.middlewares.headplane-addslash.redirectregex.replacement=https://$${1}/admin/
       - traefik.http.middlewares.headplane-addslash.redirectregex.permanent=true
       - traefik.http.routers.headplane-rtr.middlewares=headplane-addslash@docker,corsHeader@docker,secureHeaders@docker,cspHeader@docker
 
+  ## -- headscale-admin --
   headscale-admin:
-    image: goodieshq/headscale-admin:0.25.5
+    image: goodieshq/headscale-admin:0.25.6
     container_name: headscale-admin
     restart: unless-stopped
-    pull_policy: always # Or your preferred policy
+    pull_policy: always
     labels:
       - traefik.enable=true
-      - traefik.http.routers.headscale-admin-extra-rtr.rule=Host(`${HUI_URL}`) # .env for HUI_URL
+      - traefik.http.routers.headscale-admin-extra-rtr.rule=Host(`${HUI_URL}`)
       - traefik.http.routers.headscale-admin-extra-rtr.entrypoints=websecure
       - traefik.http.routers.headscale-admin-extra-rtr.tls.certresolver=myresolver
-      - traefik.http.services.headscale-admin-extra-svc.loadbalancer.server.port=80 # headscale-admin port
+      - traefik.http.services.headscale-admin-extra-svc.loadbalancer.server.port=80
       - traefik.http.routers.headscale-admin-extra-rtr.middlewares=corsHeader@docker
 
+  ## -- cloudflare-dns-sync --
+  cloudflare-dns-sync:
+    image: iamdockin/hs-dns-sync:0.0.3
+    container_name: cloudflare-dns-sync
+    restart: unless-stopped
+    env_file:
+      - ./.cloudflare-dns-sync.env
+    command: ["python", "app.py"] # Ensure it runs the app
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  ## -- traefik proxy --
   traefik:
-    image: traefik:v3.3.5 # latest traefik March 2025
+    image: traefik:v3.4.0
     pull_policy: always
     restart: unless-stopped
     container_name: traefik
@@ -78,22 +100,22 @@ services:
       - --api=true
       - --api.dashboard=false
       - --providers.docker
-      - --entrypoints.web.address=:80  # HTTP entry point
-      - --entrypoints.websecure.address=:443  # HTTPS entry point
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
       - --certificatesresolvers.myresolver.acme.tlschallenge=true
-      - --certificatesresolvers.myresolver.acme.email=${LE_EMAIL} # add in .env
+      - --certificatesresolvers.myresolver.acme.email=${LE_EMAIL} # in .env
       - --certificatesresolvers.myresolver.acme.storage=/certificates/acme.json
       - --global.sendAnonymousUsage=false
       - --entrypoints.websecure.http.tls.options=securetls@file # for TLS
     ports:
-      - 80:80  # Maps host port 80 to container port 80 for HTTP
-      - 443:443  # Maps host port 443 to container port 443 for HTTPS
+      - 80:80
+      - 443:443
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik/certificates:/certificates
       - ./traefik/logs/traefik.log:/var/log/traefik.log
       - ./traefik/tls.yml:/tls.yml # Custom TLS
-    logging: # Limit logs
+    logging:
       driver: "json-file"
       options:
         max-size: "10m"
@@ -104,7 +126,7 @@ services:
       timeout: 3s
       retries: 3
       start_period: 20s
-    deploy: # Limit resource usage
+    deploy:
       resources:
         limits:
           memory: 512M
@@ -120,7 +142,7 @@ services:
       - traefik.http.middlewares.corsHeader.headers.accesscontrolmaxage=43200
       - traefik.http.middlewares.corsHeader.headers.addvaryheader=true
 
-      # Redirect HS root path (/) to /admin (Now served by headplane)
+      # Redirect HS root path (/) to /admin (served by headplane)
       - traefik.http.middlewares.redirect-hs-root-to-admin.redirectregex.regex=^https?://([^/]+)/?$$
       - traefik.http.middlewares.redirect-hs-root-to-admin.redirectregex.replacement=https://$${1}/admin
       - traefik.http.middlewares.redirect-hs-root-to-admin.redirectregex.permanent=true
