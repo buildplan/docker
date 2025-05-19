@@ -1,0 +1,110 @@
+networks:
+  lsio:
+    external: true
+    name: "lsio"
+
+services:
+  Swag:
+
+    cap_drop:
+      - "AUDIT_CONTROL"
+      - "BLOCK_SUSPEND"
+      - "DAC_READ_SEARCH"
+      - "IPC_LOCK"
+      - "IPC_OWNER"
+      - "LEASE"
+      - "LINUX_IMMUTABLE"
+      - "MAC_ADMIN"
+      - "MAC_OVERRIDE"
+      - "NET_ADMIN"
+      - "NET_BROADCAST"
+      - "SYSLOG"
+      - "SYS_ADMIN"
+      - "SYS_BOOT"
+      - "SYS_MODULE"
+      - "SYS_NICE"
+      - "SYS_PACCT"
+      - "SYS_PTRACE"
+      - "SYS_RAWIO"
+      - "SYS_RESOURCE"
+      - "SYS_TIME"
+      - "SYS_TTY_CONFIG"
+      - "WAKE_ALARM"
+
+    container_name: "Swag"
+
+    entrypoint:
+      - "/init"
+
+    environment:
+      - "PUID=${PUID}"
+      - "PGID=${PGID}"
+      - "TZ=Europe/London"
+      - "URL=${URL}"
+      - "VALIDATION=dns"
+      - "SUBDOMAINS=wildcard"
+      - "DNSPLUGIN=cloudflare"
+      - "EMAIL=${EMAIL}"
+      - "ONLY_SUBDOMAINS=false"
+      - "STAGING=false"
+      - "PATH=/lsiopy/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+      - "PS1=$$(whoami)@$$(hostname):$$(pwd)\\$$"
+      - "HOME=/root"
+      - "TERM=xterm"
+      - "S6_CMD_WAIT_FOR_SERVICES_MAXTIME=0"
+      - "S6_VERBOSITY=1"
+      - "S6_STAGE2_HOOK=/docker-mods"
+      - "VIRTUAL_ENV=/lsiopy"
+      - "PHP_INI_SCAN_DIR=:/config/php"
+      - "LSIO_FIRST_PARTY=true"
+      - "DHLEVEL=2048"
+      - "AWS_CONFIG_FILE=/config/dns-conf/route53.ini"
+      - "S6_BEHAVIOUR_IF_STAGE2_FAILS=2"
+      - "DOCKER_MODS=linuxserver/mods:swag-auto-reload|ghcr.io/linuxserver/mods:swag-crowdsec"
+      - "CROWDSEC_API_KEY=${CROWDSEC_API_KEY}"
+      - "CROWDSEC_LAPI_URL=http://crowdsec:8080"
+      - "CROWDSEC_SITE_KEY=${CROWDSEC_SITE_KEY}"
+      - "CROWDSEC_SECRET_KEY=${CROWDSEC_SECRET_KEY}"
+
+    hostname: "${HOST_NAME}"
+
+    image: "linuxserver/swag:latest"
+
+    ipc: "private"
+
+    labels:
+      build_version: "Linuxserver.io version:- 3.0.1-ls351 Build-date:- 2025-01-07T10:30:04+00:00"
+      maintainer: "nemchik"
+      org.opencontainers.image.authors: "linuxserver.io"
+      org.opencontainers.image.created: "2025-01-07T10:30:04+00:00"
+      org.opencontainers.image.description: "SWAG - Secure Web Application Gateway (formerly known as\
+        \ letsencrypt, no relation to Let's Encrypt™) sets up an Nginx webserver and reverse proxy with\
+        \ php support and a built-in certbot client that automates free SSL server certificate generation\
+        \ and renewal processes (Let's Encrypt and ZeroSSL). It also contains fail2ban for intrusion prevention."
+      org.opencontainers.image.documentation: "https://docs.linuxserver.io/images/docker-swag"
+      org.opencontainers.image.licenses: "GPL-3.0-only"
+      org.opencontainers.image.ref.name: "410fa0515e0d431849072fa048d42e65cee9274c"
+      org.opencontainers.image.revision: "410fa0515e0d431849072fa048d42e65cee9274c"
+      org.opencontainers.image.source: "https://github.com/linuxserver/docker-swag"
+      org.opencontainers.image.title: "Swag"
+      org.opencontainers.image.url: "https://github.com/linuxserver/docker-swag/packages"
+      org.opencontainers.image.vendor: "linuxserver.io"
+      org.opencontainers.image.version: "3.0.1-ls351"
+
+    logging:
+      driver: "json-file"
+      options: {}
+
+    networks:
+      - "lsio"
+
+    ports:
+      - "443:443/tcp"
+      - "80:80/tcp"
+
+    restart: "unless-stopped"
+
+    volumes:
+      - "/volume1/docker/swag/config:/config"
+
+    working_dir: "/"
