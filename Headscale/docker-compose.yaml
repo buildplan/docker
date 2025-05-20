@@ -1,14 +1,15 @@
 services:
   ## -- headscale --
   headscale:
-    image: headscale/headscale:0.25.1
+    image: headscale/headscale:0.26.0
     pull_policy: always
     container_name: headscale
     restart: unless-stopped
     command: serve
     volumes:
       - ./headscale/config:/etc/headscale
-      - ./headscale/data:/var/lib/headscale
+      - ./headscale/data/lib:/var/lib/headscale
+      - ./headscale/data/run:/var/run/headscale
     labels:
       - traefik.enable=true
       - traefik.http.routers.headscale-rtr.rule=Host(`${HS_URL}`)  # URL for accessing Headscale - add in .env
@@ -34,7 +35,7 @@ services:
           memory: 128M
     volumes:
       - ./headplane/config.yaml:/etc/headplane/config.yaml
-      - ./headscale/config:/etc/headscale
+      - ./headscale/config/config.yaml:/etc/headscale/config.yaml
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./headplane:/var/lib/headplane
     depends_on:
@@ -69,12 +70,14 @@ services:
 
   ## -- cloudflare-dns-sync --
   cloudflare-dns-sync:
-    image: iamdockin/hs-dns-sync:0.0.3
+    image: iamdockin/hs-cf-dns-sync:0.0.3
     container_name: cloudflare-dns-sync
     restart: unless-stopped
     env_file:
       - ./.cloudflare-dns-sync.env
-    command: ["python", "app.py"] # Ensure it runs the app
+    command: ["python", "app.py"] # runs the script
+    # command for debug
+    # command: ["python", "-c", "import os; import time; print(f'PYTHON TEST OK. MODE IS ({os.environ.get(\"mode\")}) - Timestamp: {time.time()}')"]
     deploy:
       resources:
         limits:
@@ -102,6 +105,7 @@ services:
       - --providers.docker
       - --entrypoints.web.address=:80
       - --entrypoints.websecure.address=:443
+      - --entrypoints.websecure.http3=true
       - --certificatesresolvers.myresolver.acme.tlschallenge=true
       - --certificatesresolvers.myresolver.acme.email=${LE_EMAIL} # in .env
       - --certificatesresolvers.myresolver.acme.storage=/certificates/acme.json
@@ -110,6 +114,7 @@ services:
     ports:
       - 80:80
       - 443:443
+      - 443:443/udp
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik/certificates:/certificates
