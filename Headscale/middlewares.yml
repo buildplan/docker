@@ -1,0 +1,92 @@
+## ~/appdata/headscale-deploy/traefik$ cat middlewares.yml 
+http:
+  middlewares:
+    crowdsec-middleware:
+      plugin:
+        crowdsec:
+          CrowdsecLapiScheme: "http"
+          CrowdsecLapiHost: "crowdsec:8080"
+          CrowdsecLapiKey: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          CrowdsecUpdateIntervalSeconds: 60
+          ClientTrustedIPs:
+            - "000.000.00.0/32" # private ip 1
+            - "000.000.00.0/32" # private ip 2
+            - "10.0.0.0/16" # tailnet
+            - "192.168.0.0/24" # local network
+            - "172.18.0.0/16" # docker network
+
+    secureHeaders:
+      headers:
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+        forceSTSHeader: true
+        browserXssFilter: true
+        contentTypeNosniff: true
+        referrerPolicy: "same-origin"
+        customRequestHeaders:
+          X-Forwarded-Proto: "https"
+        frameDeny: true
+        permissionsPolicy: "geolocation=(), microphone=(), camera=()"
+
+    corsHeader:
+      headers:
+        accessControlAllowMethods:
+          - "GET"
+          - "OPTIONS"
+          - "PUT"
+        accessControlAllowHeaders:
+          - "Authorization"
+          - "*"
+        accessControlAllowOriginList:
+          - "https://heads.mydomain.cloud"
+          - "https://hui.mydomain.cloud"
+        accessControlMaxAge: 43200
+        addVaryHeader: true
+
+    cspHeader:
+      headers:
+        customResponseHeaders:
+          Content-Security-Policy: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'"
+
+    redirectToHttps:
+      redirectScheme:
+        scheme: "https"
+        permanent: true
+
+    headplane-addslash:
+      redirectRegex:
+        regex: "^https?://([^/]+)/admin$$"
+        replacement: "https://$${1}/admin/"
+        permanent: true
+
+    redirect-heads-root-to-admin-slash:
+      redirectRegex:
+        regex: "^https?://heads\\.mydomain\\.cloud/?$$"
+        replacement: "https://heads.mydomain.cloud/admin/"
+        permanent: true
+
+    redirect-hui-root-to-admin:
+      redirectRegex:
+        regex: "^https?://hui\\.mydomain\\.cloud/?$$"
+        replacement: "https://hui.mydomain.cloud/admin"
+        permanent: true
+
+    geoBlock:
+      plugin:
+        geoblock:
+          allowLocalRequests: true
+          api: "https://get.geojs.io/v1/ip/country/{ip}"
+          cacheSize: 15
+          logFilePath: "/var/log/traefik/geoblock.log"
+          allowedIPAddresses:
+            - "000.000.00.0/32" # private ip 1
+            - "000.000.00.0/32" # private ip 2
+            - "10.0.0.0/16" # tailnet
+            - "192.168.0.0/24" # local network
+            - "172.18.0.0/16" # docker network
+          allowUnknownCountries: false
+          countries:
+            - "GB"
+            - "US"
+	          # add more here
