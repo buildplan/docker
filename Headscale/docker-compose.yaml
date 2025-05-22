@@ -1,28 +1,30 @@
+## ~/appdata/headscale-deploy$ cat docker-compose.yaml 
 services:
   ## -- headscale --
   headscale:
     image: headscale/headscale:0.26.0
-    pull_policy: always
     container_name: headscale
     restart: unless-stopped
+    depends_on:
+      traefik:
+        condition: service_started
     command: serve
     volumes:
       - ./headscale/config:/etc/headscale
       - ./headscale/data/lib:/var/lib/headscale
       - ./headscale/data/run:/var/run/headscale
     labels:
-      - traefik.enable=true
-      - traefik.http.routers.headscale-rtr.rule=Host(`${HS_URL}`)  # URL for accessing Headscale - add in .env
-      - traefik.http.routers.headscale-rtr.priority=90
-      - traefik.http.routers.headscale-rtr.entrypoints=websecure
-      - traefik.http.routers.headscale-rtr.tls.certresolver=myresolver
-      - traefik.http.services.headscale-svc.loadbalancer.server.port=8080  # Port for Headscale service
-      - traefik.http.routers.headscale-rtr.middlewares=corsHeader@docker,secureHeaders@docker,cspHeader@docker  # Apply CSP
+      - "traefik.enable=true"
+      - "traefik.http.routers.headscale-rtr.rule=Host(`${HS_URL}`)"  # URL for accessing Headscale - add in .env
+      - "traefik.http.routers.headscale-rtr.priority=90"
+      - "traefik.http.routers.headscale-rtr.entrypoints=websecure"
+      - "traefik.http.routers.headscale-rtr.tls.certresolver=myresolver"
+      - "traefik.http.services.headscale-svc.loadbalancer.server.port=8080"  # Port for Headscale service
+      - "traefik.http.routers.headscale-rtr.middlewares=corsHeader@file,secureHeaders@file,cspHeader@file,crowdsec-middleware@file,oVPSgeoBlock@file"
 
   ## -- headplane --
   headplane:
     image: ghcr.io/tale/headplane:next
-    pull_policy: always
     container_name: headplane
     restart: unless-stopped
     deploy:
@@ -39,39 +41,47 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./headplane:/var/lib/headplane
     depends_on:
-      - headscale
+      headscale:
+        condition: service_started
+      traefik:
+        condition: service_healthy
     labels:
       - traefik.enable=true
       # Router Definition 
-      - traefik.http.routers.headplane-rtr.rule=Host(`${HS_URL}`) && PathPrefix(`/admin`)
-      - traefik.http.routers.headplane-rtr.priority=100 # sets priority over base-domain
-      - traefik.http.routers.headplane-rtr.entrypoints=websecure
-      - traefik.http.routers.headplane-rtr.tls.certresolver=myresolver
-      - traefik.http.services.headplane-svc.loadbalancer.server.port=3000 # headplane port
-      # ---- Middleware for redirect base domain to /admin ----
-      - traefik.http.middlewares.headplane-addslash.redirectregex.regex=^https?://([^/]+)/admin$$
-      - traefik.http.middlewares.headplane-addslash.redirectregex.replacement=https://$${1}/admin/
-      - traefik.http.middlewares.headplane-addslash.redirectregex.permanent=true
-      - traefik.http.routers.headplane-rtr.middlewares=headplane-addslash@docker,corsHeader@docker,secureHeaders@docker,cspHeader@docker
+      - "traefik.http.routers.headplane-rtr.rule=Host(`${HS_URL}`) && PathPrefix(`/admin`)"
+      - "traefik.http.routers.headplane-rtr.priority=100" # sets priority over base-domain
+      - "traefik.http.routers.headplane-rtr.entrypoints=websecure"
+      - "traefik.http.routers.headplane-rtr.tls.certresolver=myresolver"
+      - "traefik.http.services.headplane-svc.loadbalancer.server.port=3000" # headplane port
+      - "traefik.http.routers.headplane-rtr.middlewares=headplane-addslash@file,corsHeader@file,secureHeaders@file,cspHeader@file,crowdsec-middleware@file,oVPSgeoBlock@file"
 
   ## -- headscale-admin --
   headscale-admin:
     image: goodieshq/headscale-admin:0.25.6
     container_name: headscale-admin
     restart: unless-stopped
-    pull_policy: always
+    depends_on:
+      headscale:
+        condition: service_started
+      traefik:
+        condition: service_healthy
     labels:
-      - traefik.enable=true
-      - traefik.http.routers.headscale-admin-extra-rtr.rule=Host(`${HUI_URL}`)
-      - traefik.http.routers.headscale-admin-extra-rtr.entrypoints=websecure
-      - traefik.http.routers.headscale-admin-extra-rtr.tls.certresolver=myresolver
-      - traefik.http.services.headscale-admin-extra-svc.loadbalancer.server.port=80
-      - traefik.http.routers.headscale-admin-extra-rtr.middlewares=corsHeader@docker
+      - "traefik.enable=true"
+      - "traefik.http.routers.headscale-admin-extra-rtr.rule=Host(`${HUI_URL}`)"
+      - "traefik.http.routers.headscale-admin-extra-rtr.entrypoints=websecure"
+      - "traefik.http.routers.headscale-admin-extra-rtr.tls.certresolver=myresolver"
+      - "traefik.http.services.headscale-admin-extra-svc.loadbalancer.server.port=80"
+      - "traefik.http.routers.headscale-admin-extra-rtr.middlewares=corsHeader@file,crowdsec-middleware@file,oVPSgeoBlock@file"
 
   ## -- cloudflare-dns-sync --
   cloudflare-dns-sync:
     image: iamdockin/hs-cf-dns-sync:0.0.3
     container_name: cloudflare-dns-sync
+    labels:
+      - "traefik.enable=false"
+    depends_on:
+      headscale:
+        condition: service_started
     restart: unless-stopped
     env_file:
       - ./.cloudflare-dns-sync.env
@@ -92,39 +102,69 @@ services:
   ## -- traefik proxy --
   traefik:
     image: traefik:v3.4.0
-    pull_policy: always
     restart: unless-stopped
     container_name: traefik
+    depends_on:
+      crowdsec:
+        condition: service_healthy
     command:
-      - --log.filePath=/var/log/traefik.log
-      - --accesslog=true
-      - --log.level=INFO
-      - --ping=true
-      - --api=true
-      - --api.dashboard=false
-      - --providers.docker
-      - --entrypoints.web.address=:80
-      - --entrypoints.websecure.address=:443
-      - --entrypoints.websecure.http3=true
-      - --certificatesresolvers.myresolver.acme.tlschallenge=true
-      - --certificatesresolvers.myresolver.acme.email=${LE_EMAIL} # in .env
-      - --certificatesresolvers.myresolver.acme.storage=/certificates/acme.json
-      - --global.sendAnonymousUsage=false
-      - --entrypoints.websecure.http.tls.options=securetls@file # for TLS
+      # - --log.filePath=/var/log/traefik/app
+      - "--providers.file.filename=/etc/traefik/dynamic/tls.yml"
+      - "--providers.file.directory=/etc/traefik/dynamic"
+      - "--providers.file.watch=true"
+      - "--accesslog=true"
+      - "--accesslog.filePath=/var/log/traefik/access.log"
+      - "--accesslog.format=json"
+      - "--log.level=INFO"
+      - "--ping=true"
+      - "--api=true"
+      - "--api.dashboard=false"
+      - "--providers.docker"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.websecure.http3=true"
+      - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
+      - "--certificatesresolvers.myresolver.acme.email=${LE_EMAIL}" # in .env
+      - "--certificatesresolvers.myresolver.acme.storage=/certificates/acme.json"
+      - "--global.sendAnonymousUsage=false"
+      - "--entrypoints.websecure.http.tls.options=securetls@file" # for TLS
+      # --- CROWDSEC PLUGIN ---
+      - "--experimental.plugins.crowdsec.modulename=github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin"
+      - "--experimental.plugins.crowdsec.version=v1.4.2"
+      # --- GEOBLOCK PLUGIN ---
+      - "--experimental.plugins.geoblock.modulename=github.com/PascalMinder/geoblock"
+      - "--experimental.plugins.geoblock.version=v0.3.3"
     ports:
-      - 80:80
-      - 443:443
-      - 443:443/udp
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik/certificates:/certificates
-      - ./traefik/logs/traefik.log:/var/log/traefik.log
-      - ./traefik/tls.yml:/tls.yml # Custom TLS
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+      - ./traefik/logs:/var/log/traefik
+      - ./traefik/tls.yml:/etc/traefik/dynamic/tls.yml
+      - ./traefik/middlewares.yml:/etc/traefik/dynamic/middlewares.yml
+    labels:
+      # ---- Router for HS_URL root redirect ----
+      - "traefik.http.routers.hs-root-redirect.rule=Host(`${HS_URL}`) && Path(`/`)"
+      - "traefik.http.routers.hs-root-redirect.priority=95"
+      - "traefik.http.routers.hs-root-redirect.entrypoints=websecure"
+      - "traefik.http.routers.hs-root-redirect.tls.certresolver=myresolver"
+      - "traefik.http.routers.hs-root-redirect.middlewares=redirect-heads-root-to-admin-slash@file,secureHeaders@file,cspHeader@file"
+      - "traefik.http.routers.hs-root-redirect.service=noop@internal"
+
+      # ---- Router for HUI_URL ----
+      - "traefik.http.routers.hui-root-redirect.rule=Host(`${HUI_URL}`) && Path(`/`)"
+      - "traefik.http.routers.hui-root-redirect.priority=95"
+      - "traefik.http.routers.hui-root-redirect.entrypoints=websecure"
+      - "traefik.http.routers.hui-root-redirect.tls.certresolver=myresolver"
+      - "traefik.http.routers.hui-root-redirect.middlewares=redirect-hui-root-to-admin@file,secureHeaders@file"
+      - "traefik.http.routers.hui-root-redirect.service=noop@internal"
+
+      # ---- Global Redirect HTTP to HTTPS ----
+      - "traefik.http.routers.http-catchall.rule=hostregexp(`{host:.+}`)"
+      - "traefik.http.routers.http-catchall.entrypoints=web"
+      - "traefik.http.routers.http-catchall.middlewares=redirectToHttps@file"
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--output-document=/dev/null", "http://127.0.0.1:8080/ping"]
       interval: 30s
@@ -139,56 +179,42 @@ services:
         reservations:
           memory: 128M
           cpus: '0.25'
-    labels:
-      # CORS middleware for API calls
-      - traefik.http.middlewares.corsHeader.headers.accesscontrolallowmethods=GET,OPTIONS,PUT
-      - traefik.http.middlewares.corsHeader.headers.accesscontrolallowheaders=Authorization,*
-      - traefik.http.middlewares.corsHeader.headers.accesscontrolalloworiginlist=https://${HS_URL},https://${HUI_URL}
-      - traefik.http.middlewares.corsHeader.headers.accesscontrolmaxage=43200
-      - traefik.http.middlewares.corsHeader.headers.addvaryheader=true
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-      # Redirect HS root path (/) to /admin (served by headplane)
-      - traefik.http.middlewares.redirect-hs-root-to-admin.redirectregex.regex=^https?://([^/]+)/?$$
-      - traefik.http.middlewares.redirect-hs-root-to-admin.redirectregex.replacement=https://$${1}/admin
-      - traefik.http.middlewares.redirect-hs-root-to-admin.redirectregex.permanent=true
-      - traefik.http.routers.hs-root-redirect.rule=Host(`${HS_URL}`) && Path(`/`)
-      - traefik.http.routers.hs-root-redirect.priority=95 # Higher than headscale (90), lower than headplane (100)
-      - traefik.http.routers.hs-root-redirect.entrypoints=websecure
-      - traefik.http.routers.hs-root-redirect.tls.certresolver=myresolver
-      - traefik.http.routers.hs-root-redirect.middlewares=redirect-hs-root-to-admin@docker,secureHeaders@docker,cspHeader@docker  # Apply CSP
-      - traefik.http.routers.hs-root-redirect.service=noop@internal
-
-      # ---- REDIRECT FOR HUI - Headsscale-admin ----
-      - traefik.http.middlewares.redirect-hui-root-to-admin.redirectregex.regex=^https?://${HUI_URL}/?$$
-      - traefik.http.middlewares.redirect-hui-root-to-admin.redirectregex.replacement=https://${HUI_URL}/admin
-      - traefik.http.middlewares.redirect-hui-root-to-admin.redirectregex.permanent=true
-      - traefik.http.routers.hui-root-redirect.rule=Host(`${HUI_URL}`) && Path(`/`)
-      - traefik.http.routers.hui-root-redirect.entrypoints=websecure
-      - traefik.http.routers.hui-root-redirect.tls.certresolver=myresolver
-      - traefik.http.routers.hui-root-redirect.service=noop@internal
-      - traefik.http.routers.hui-root-redirect.middlewares=redirect-hui-root-to-admin@docker,secureHeaders@docker # add secureHeaders@docker etc
-
-      # HSTS Security Headers
-      - traefik.http.middlewares.secureHeaders.headers.stsSeconds=31536000 # 1 year
-      - traefik.http.middlewares.secureHeaders.headers.stsIncludeSubdomains=true
-      - traefik.http.middlewares.secureHeaders.headers.stsPreload=true
-      - traefik.http.middlewares.secureHeaders.headers.forceSTSHeader=true
-
-      # Global Redirect HTTP to HTTPS
-      - traefik.http.routers.http-catchall.rule=hostregexp(`{host:.+}`)
-      - traefik.http.routers.http-catchall.entrypoints=web
-      - traefik.http.routers.http-catchall.middlewares=redirect-to-https@docker
-      - traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https
-      - traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true
-
-      # Enforce Secure Cookies & Enhanced Security
-      - traefik.http.middlewares.secureHeaders.headers.browserXssFilter=true
-      - traefik.http.middlewares.secureHeaders.headers.contentTypeNosniff=true
-      - traefik.http.middlewares.secureHeaders.headers.referrerPolicy=same-origin
-      - traefik.http.middlewares.secureHeaders.headers.customrequestheaders.X-Forwarded-Proto=https
-      - traefik.http.middlewares.secureHeaders.headers.customresponseheaders.Strict-Transport-Security=max-age=31536000; includeSubDomains; preload
-      - traefik.http.middlewares.secureHeaders.headers.frameDeny=true  # Prevent Clickjacking
-      - traefik.http.middlewares.secureHeaders.headers.permissionsPolicy=geolocation=(), microphone=(), camera=() # Restrict Browser Features
-
-      # Content Security Policy (CSP)
-      - traefik.http.middlewares.cspHeader.headers.customresponseheaders.Content-Security-Policy="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'"
+  ## -- crowdsec agent --
+  crowdsec:
+    image: crowdsecurity/crowdsec:latest
+    container_name: crowdsec
+    restart: unless-stopped
+    expose:
+      - "8080"
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./crowdsec/config:/etc/crowdsec:rw
+      - ./crowdsec/data:/var/lib/crowdsec/data:rw
+      - ./traefik/logs:/var/log/traefik:ro
+      - /var/log/auth.log:/var/log/host_auth.log:ro
+    environment:
+      GID: "${GID:-1000}"
+      COLLECTIONS: "crowdsecurity/traefik crowdsecurity/sshd crowdsecurity/linux crowdsecurity/base-http-scenarios crowdsecurity/whitelist-good-actors"
+    healthcheck:
+      test: ["CMD-SHELL", "cscli lapi status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
