@@ -1,16 +1,24 @@
+~/appdata/headscale-deploy/headplane$ cat config.yaml
 server:
   host: "0.0.0.0"
   port: 3000
-  cookie_secret: "e919exxxxxxxxxxxxxxxxxxxxx" # Change this!
+  cookie_secret: "xxxxxxxxxxxxxxxxxxxxxxx"
   cookie_secure: true
 
 headscale:
-  url: "https://heads.example.com"  # change this
+  url: "https://hp.mydomain.tld"
   config_path: "/etc/headscale/config.yaml"
   config_strict: true
 
 # Integration configurations
 integration:
+  agent:
+    enabled: true
+    pre_authkey: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    host_name: "headplane-agent"
+    cache_ttl: 60
+    cache_path: "/var/lib/headplane/agent_cache.json"
+    work_dir: "/var/lib/headplane/agent"
   docker:
     enabled: true
     container_name: "headscale"
@@ -22,13 +30,13 @@ integration:
   proc:
     enabled: false
 
-# OIDC Configuration
+# OIDC Configuration for authentication
 oidc:
-  issuer: "https://accounts.google.com"
-  client_id: "147852369xxxxxxxxxxxxxxxxxxxxxxxxxxapps.googleusercontent.com" # change this
-  client_secret_path: "/etc/headplane/secrets/oidc_client_secret" # container internal path mounted in docker-compose
-  disable_api_key_login: false
+  issuer: "https://id.mydomain.tld/.well-known/openid-configuration"
+  client_id: "xxxxxx-xxxxxxxxxxx-xxxxxxxx"
+  client_secret: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  disable_api_key_login: true
   token_endpoint_auth_method: "client_secret_post"
-  headscale_api_key: "O-0000000000000000000000000000" # change this
-  redirect_uri: "https://heads.alisufyan.cloud/admin/oidc/callback"
+  headscale_api_key: "xxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  redirect_uri: "https://hp.mydomain.tld/admin/oidc/callback"
   user_storage_file: "/var/lib/headplane/users.json"
