@@ -1,0 +1,69 @@
+networks:
+  traefik-net:
+    external: true
+
+services:
+  traefik:
+    image: traefik:v3.4.0
+    container_name: traefik
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - traefik-net
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/data/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/data/acme.json:/acme.json
+      - ./traefik/logs:/var/log/traefik
+
+  adguardhome:
+    image: adguard/adguardhome:latest
+    container_name: adguardhome
+    restart: unless-stopped
+    env_file:
+      - .env
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - traefik-net
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+      - "853:853/tcp"
+      - "853:853/udp"
+    volumes:
+      - ./adguardhome/work:/opt/adguardhome/work
+      - ./adguardhome/conf:/opt/adguardhome/conf
+    labels:
+      - "traefik.enable=true"
+
+      # HTTP Router (for initial request before redirect by Traefik entrypoint)
+      - "traefik.http.routers.adguard-http.rule=Host(`${SINK_URL}`)"
+      - "traefik.http.routers.adguard-http.entrypoints=web"
+      - "traefik.http.routers.adguard-http.service=adguard-ui-svc"
+
+      # HTTPS Router for AdGuard Home UI (via websecure entrypoint)
+      - "traefik.http.routers.adguard-ui-secure.rule=Host(`${SINK_URL}`)"
+      - "traefik.http.routers.adguard-ui-secure.entrypoints=websecure"
+      - "traefik.http.routers.adguard-ui-secure.service=adguard-ui-svc"
+      - "traefik.http.routers.adguard-ui-secure.middlewares=my-agh-oidc@docker" # Name for the OIDC middleware instance
+
+      # AdGuard Home UI Service Definition for Traefik
+      - "traefik.http.services.adguard-ui-svc.loadbalancer.server.port=3000" # AdGuard's internal web UI port
+
+      # OIDC Middleware Definition using the Plugin (sevensolutions/traefik-oidc-auth)
+      - "traefik.http.middlewares.my-agh-oidc.plugin.oidcAuth.Secret=${RANDOM_SECRET_KEY}"
+      - "traefik.http.middlewares.my-agh-oidc.plugin.oidcAuth.Provider.Url=${OIDC_URL}"
+      - "traefik.http.middlewares.my-agh-oidc.plugin.oidcAuth.Provider.ClientId=${OIDC_CLIENT_ID}"
+      - "traefik.http.middlewares.my-agh-oidc.plugin.oidcAuth.Provider.ClientSecret=${OIDC_CLIENT_SECRET}"
+      - "traefik.http.middlewares.my-agh-oidc.plugin.oidcAuth.Scopes=openid profile email"
+
+      # DNS-over-HTTPS (DoH) Router - NO OIDC AUTH on this path
+      - "traefik.http.routers.adguard-doh.rule=Host(`${SINK_URL}`) && PathPrefix(`/dns-query`)"
+      - "traefik.http.routers.adguard-doh.entrypoints=websecure"
+      - "traefik.http.routers.adguard-doh.service=adguard-doh-svc"
+      - "traefik.http.services.adguard-doh-svc.loadbalancer.server.port=3000" # AdGuard's internal web UI port
