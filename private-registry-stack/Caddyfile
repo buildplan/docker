@@ -1,30 +1,125 @@
+# --- Global options ---
 {
-	email user@mydomain.com
+	email letse@mydomain.tld
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 10mb
+			roll_keep 5
+			roll_keep_for 360h
+		}
+		format json
+		level INFO
+	}
 }
 
 # --- Registry API Block ---
-registry.mydomain.com {
+registry.mydomain.tld {
 	basic_auth {
-		user password_hash_goes_here
+		user1 $2a$16xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx # genrate this
+		serve_push $2a$16xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx # genrate this
 	}
 
 	reverse_proxy registry:5000
+	log {
+		output file /var/log/caddy/access.log
+		format json
+	}
 }
 
 # --- UI Block ---
-ui.registry.mydomain.com {
+ui.registry.mydomain.tld {
 	basic_auth {
-		reg_user password_hash_goes_here
+		user1_reg $2a$16xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx # genrate this
 	}
 	reverse_proxy registry_ui:80
+
+	log {
+		output file /var/log/caddy/access.log
+		format json
+	}
 
 	header {
 		Strict-Transport-Security "max-age=31536000;"
 		X-Frame-Options "SAMEORIGIN"
 		X-Content-Type-Options "nosniff"
 		X-XSS-Protection "1; mode=block"
-		Permissions-Policy "camera=(), microphone=(), geolocation=()"
 		Referrer-Policy "strict-origin-when-cross-origin"
-		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; form-action 'self'; frame-ancestors 'none';"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; font-src 'self'; form-action 'self'; frame-ancestors 'none';"
+	}
+}
+
+# --- Portainer Block ---
+port.registry.mydomain.tld {
+	basic_auth {
+		user1_port $2a$16xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx # genrate this
+	}
+
+	reverse_proxy http://portainer:9000
+
+	log {
+		output file /var/log/caddy/access.log
+		format json
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000;"
+		X-Frame-Options "SAMEORIGIN" # Using SAMEORIGIN like your UI block
+		X-Content-Type-Options "nosniff"
+		X-XSS-Protection "1; mode=block"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		# Note: CSP might need adjustment depending on Portainer's specific needs
+		# Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; font-src 'self'; form-action 'self'; frame-ancestors 'none';"
+	}
+}
+
+# --- Prometheus Block ---
+prom.registry.mydomain.tld {
+	basic_auth {
+		user1 $2a$16xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx # genrate this
+	}
+
+	reverse_proxy http://prometheus:9090
+
+	log {
+		output file /var/log/caddy/access.log
+		format json
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000;"
+		X-Frame-Options "SAMEORIGIN" # Using SAMEORIGIN like your UI block
+		X-Content-Type-Options "nosniff"
+		X-XSS-Protection "1; mode=block"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		# Note: CSP might need adjustment depending on Portainer's specific needs
+		# Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src>
+	}
+}
+
+# --- Grafana Block ---
+stats.registry.mydomain.tld {
+	# basic_auth { # disabled because uses OIDC
+	# user1 $2a$16xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx # genrate this
+	# }
+
+	reverse_proxy http://grafana:3000
+
+	log {
+		output file /var/log/caddy/access.log
+		format json
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000;"
+		X-Frame-Options "SAMEORIGIN"
+		X-Content-Type-Options "nosniff"
+		X-XSS-Protection "1; mode=block"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		# Note: CSP might need adjustment depending on Portainer's specific needs
+		# Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src>
 	}
 }
