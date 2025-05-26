@@ -289,7 +289,7 @@ services:
           cpus: '0.25'
           memory: 512M
 
-  # --- NOTIFICATION SERVICE ---
+  # --- registry update notifications ---
   registry-webhook-receiver:
     image: iamdockin/registry-webhook-receiver:latest
     container_name: registry-webhook-receiver
