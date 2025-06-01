@@ -14,7 +14,7 @@ services:
       - registry-net
     environment:
       OTEL_TRACES_EXPORTER: "none"
-      REGISTRY_HTTP_SECRET: ${REGISTRY_HTTP_SECRET}
+      REGISTRY_HTTP_SECRET: ${REGISTRY_HTTP_SECRET} # .env for all the veriables
     restart: unless-stopped
     logging:
       driver: "json-file"
@@ -30,7 +30,7 @@ services:
   # --- proxy ---
   caddy:
     image: caddy:2.10.0
-    container_name: caddy_proxy
+    container_name: caddy
     ports:
       - "80:80"
       - "443:443"
@@ -62,7 +62,7 @@ services:
 
   # --- ui ---
   registry-ui:
-    image: joxit/docker-registry-ui:2.5.7
+    image: joxit/docker-registry-ui:main  # 2.5.7
     container_name: registry_ui
     networks:
       - registry-net
@@ -166,7 +166,7 @@ services:
 
   # --- Prometheus Service ---
   prometheus:
-    image: prom/prometheus:v3.4.0
+    image: prom/prometheus:v3.4.1
     container_name: prometheus
     restart: unless-stopped
     volumes:
@@ -196,7 +196,7 @@ services:
 
   # --- Grafana Service ---
   grafana:
-    image: grafana/grafana:12.0.0
+    image: grafana/grafana:12.0.1
     container_name: grafana
     restart: unless-stopped
     # ports:
@@ -289,7 +289,7 @@ services:
           cpus: '0.25'
           memory: 512M
 
-  # --- registry update notifications ---
+  # --- NOTIFICATION APP SERVICE ---
   registry-webhook-receiver:
     image: iamdockin/registry-webhook-receiver:latest
     container_name: registry-webhook-receiver
