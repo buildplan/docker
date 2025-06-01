@@ -1,28 +1,48 @@
+networks:
+  tianji-net:
+    driver: bridge
+
 services:
   tianji:
     image: moonrailgun/tianji
+    container_name: tianji
     ports:
       - "127.0.0.1:12345:12345"
-      - "192.168.10.20:12345:12345" #replace ip with tailscale or local
+      - "10.0.0.0:12345:12345" # tailscle ipv4
+    networks:
+      - tianji-net
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@tianji-db:5432/${POSTGRES_DB} # create .env 
       JWT_SECRET: ${JWT_SECRET}
-      ALLOW_REGISTER: "true"
+      CUSTOM_TRACKER_SCRIPT_NAME: ${CUSTOM_TRACKER_SCRIPT_NAME} # .env
+      ALLOW_REGISTER: "false"
       ALLOW_OPENAPI: "false"
+      DISABLE_ANONYMOUS_TELEMETRY: "true"
     depends_on:
-      - postgres
+      tianji-db:
+        condition: service_healthy
     restart: unless-stopped
-  postgres:
-    image: postgres:15.4-alpine
+    logging:
+      driver: "json-file"
+      options: { max-size: "5m", max-file: "3" }
+
+  tianji-db:
+    image: postgres:17-alpine
+    container_name: tianji-db
+    networks:
+      - tianji-net
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - ./tianji_db:/var/lib/postgresql/data
+      - ./tianji_db:/var/lib/postgresql/data #create tianji_db dir.
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 5s
       retries: 5
+    logging:
+      driver: "json-file"
+      options: { max-size: "5m", max-file: "3" }
