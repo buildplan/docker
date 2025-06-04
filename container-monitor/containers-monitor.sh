@@ -154,46 +154,123 @@ check_container_restarts() {
 
 check_for_updates() {
     local container_name="$1"
-    local image_name=$(docker inspect -f '{{.Config.Image}}' "$container_name")
+    # This is the image reference used to start the container, e.g., my.server/image:tag, image:tag, or a SHA ID.
+    local current_image_ref
+    current_image_ref=$(docker inspect -f '{{.Config.Image}}' "$container_name")
 
-    local registry=""
-    local full_image_name=""
-    local image=""
-    local tag="latest"
-
-    if [[ "$image_name" =~ (.+/)?([^:]+)(:(.+))? ]]; then
-      registry="${BASH_REMATCH[1]}"
-      image="${BASH_REMATCH[2]}"
-      tag="${BASH_REMATCH[4]:-latest}"
+    # Handle cases where update check by tag is not applicable
+    if [[ "$current_image_ref" == *@sha256:* ]]; then
+        print_message "  Update Check: Container '$container_name' is running from an image pinned by digest ($current_image_ref). Update check by tag is not applicable." "INFO"
+        return 0 # Not an error, but check cannot proceed in the usual way.
     fi
-    registry=${registry%/}
-
-    if [ -z "$registry" ]; then
-      registry="registry-1.docker.io"
-      full_image_name="library/$image"
-    else
-      full_image_name="$image"
+    if [[ "$current_image_ref" =~ ^sha256:[0-9a-fA-F]{64}$ ]]; then
+        print_message "  Update Check: Container '$container_name' is running directly from an image ID ($current_image_ref). Cannot determine registry to check for updates." "INFO"
+        return 0 # Not an error, but cannot determine registry.
     fi
+
+    # --- Image Parsing Logic ---
+    local registry_host=""
+    local image_path_for_skopeo="" # This is the part after the registry host, e.g., "namespace/image" or "library/image"
+    local tag="latest"         # Default tag
+
+    local image_name_no_tag="$current_image_ref"
+    if [[ "$current_image_ref" == *":"* ]]; then
+        # Check if the part after the last colon looks like a digest (common if image is referenced by name and digest)
+        # This is a basic check; actual digest-pinning is handled by the @sha256 check above.
+        if [[ "${current_image_ref##*:}" =~ ^[0-9a-fA-F]{7,}$ && "${current_image_ref}" == *@* ]]; then # Heuristic for something like image@sha256:digest_prefix
+             print_message "  Update Check: Image reference '$current_image_ref' for container '$container_name' appears to be digest-pinned. Skipping tag-based update check." "INFO"
+             return 0
+        fi
+        tag="${current_image_ref##*:}"
+        image_name_no_tag="${current_image_ref%:*}"
+    fi
+
+    if [[ "$image_name_no_tag" == *"/"* ]]; then # Contains a slash, e.g., registry/image or user/image
+        local first_part
+        first_part=$(echo "$image_name_no_tag" | cut -d'/' -f1)
+        # Check if the first part is a hostname (contains a dot or 'localhost' or a port number)
+        if [[ "$first_part" == *"."* ]] || [[ "$first_part" == "localhost" ]] || [[ "$first_part" == *":"* ]]; then
+            registry_host="$first_part"
+            image_path_for_skopeo=$(echo "$image_name_no_tag" | cut -d'/' -f2-)
+        else # No dot, not localhost, no port: assume it's Docker Hub, e.g., username/image
+            registry_host="registry-1.docker.io"
+            image_path_for_skopeo="$image_name_no_tag" # e.g., "username/image"
+        fi
+    else # No slash, e.g., "nginx", assume Docker Hub official image
+        registry_host="registry-1.docker.io"
+        image_path_for_skopeo="library/$image_name_no_tag" # e.g., "library/nginx"
+    fi
+    # --- End of Image Parsing Logic ---
+
+    local skopeo_image_ref="docker://$registry_host/$image_path_for_skopeo:$tag"
 
     if ! command -v skopeo >/dev/null 2>&1; then
-      print_message "  Update Check: Error - skopeo is not installed." "DANGER"
-      return 1
+        print_message "  Update Check: Error - skopeo is not installed. Cannot check for updates for '$container_name'." "DANGER"
+        return 1 # Report as an issue
     fi
 
-    local local_digest=$(docker inspect -f '{{index .RepoDigests 0}}' "$image_name" | cut -d '@' -f 2)
-    remote_digest=$(skopeo inspect "docker://$registry/$full_image_name:$tag" | jq -r '.Digest')
+    # --- Local Digest Retrieval ---
+    # We need to find a RepoDigest that matches the registry and path we are checking against.
+    local search_pattern_in_repodigests="^${registry_host}/${image_path_for_skopeo}@"
+    local local_digest_line
+    # $current_image_ref is the image name/tag/id docker has recorded for the container.
+    # Inspecting this ref should give its RepoDigests.
+    local_digest_line=$(docker inspect -f '{{range .RepoDigests}}{{.}}{{println}}{{end}}' "$current_image_ref" 2>/dev/null | grep -E "$search_pattern_in_repodigests" | head -n 1)
 
-    if [ -z "$remote_digest" ] || [ -z "$local_digest" ]; then
-        print_message "  Update Check: Error - while checking for updates." "DANGER"
-        return 1;
-    fi
-
-    if [ "$remote_digest" != "$local_digest" ]; then
-      print_message "  Update Check: Update available!\n    Current: $local_digest\n    New: $remote_digest" "WARNING"
-      return 1
+    local local_digest=""
+    if [[ -n "$local_digest_line" && "$local_digest_line" == *@* ]]; then
+        local_digest="${local_digest_line##*@}"
     else
-      print_message "  Update Check: No updates available. Current digest is up-to-date." "GOOD"
-      return 0
+        # Fallback: If no specific RepoDigest matches (e.g. image was retagged, or registry name in RepoDigest differs slightly like docker.io vs registry-1.docker.io)
+        # Try to get the first available RepoDigest. This is less precise.
+        print_message "  Update Check: No local RepoDigest found for '$current_image_ref' matching '$search_pattern_in_repodigests'. Using first available RepoDigest for comparison. This might be less accurate." "INFO"
+        local_digest_line=$(docker inspect -f '{{index .RepoDigests 0}}' "$current_image_ref" 2>/dev/null)
+        if [[ -n "$local_digest_line" && "$local_digest_line" == *@* ]]; then
+            local_digest="${local_digest_line##*@}"
+        fi
+    fi
+
+    if [ -z "$local_digest" ]; then
+        print_message "  Update Check: Failed to determine local image digest for '$current_image_ref' ($registry_host/$image_path_for_skopeo). Image may not have RepoDigests or was perhaps only built locally. Cannot check for updates." "WARNING"
+        return 1 # Report as an issue as we cannot determine if an update is needed
+    fi
+    # --- End of Local Digest Retrieval ---
+
+    print_message "  Update Check: Checking remote image '$skopeo_image_ref' for updates..." "INFO"
+    local skopeo_output
+    local skopeo_exit_code
+    # Capture both stdout and stderr from skopeo
+    skopeo_output=$(skopeo inspect "$skopeo_image_ref" 2>&1)
+    skopeo_exit_code=$?
+
+    local remote_digest=""
+    if [ $skopeo_exit_code -eq 0 ]; then
+        remote_digest=$(echo "$skopeo_output" | jq -r '.Digest')
+        if [ "$remote_digest" == "null" ] || [ -z "$remote_digest" ]; then # jq -r '.Digest' outputs "null" string if key not found or value is null
+            print_message "  Update Check: Error - skopeo inspect succeeded for '$skopeo_image_ref' but returned no digest." "DANGER"
+            print_message "    Skopeo output: $skopeo_output" "INFO"
+            return 1
+        fi
+    else
+        print_message "  Update Check: Error inspecting remote image '$skopeo_image_ref'." "DANGER"
+        if echo "$skopeo_output" | grep -qiE "unauthorized|authentication required|denied|forbidden|credentials"; then
+            print_message "    Error details: Authentication failed. Ensure you are logged into '$registry_host' (e.g., run 'docker login $registry_host')." "DANGER"
+        elif echo "$skopeo_output" | grep -qiE "manifest unknown|not found|no such host"; then
+            print_message "    Error details: Image or tag not found at remote registry, or registry host is invalid: '$skopeo_image_ref'." "DANGER"
+        else
+            print_message "    Skopeo command failed with exit code $skopeo_exit_code." "WARNING"
+        fi
+        print_message "    Full skopeo error: $skopeo_output" "INFO" # Log full error for debugging
+        return 1 # Report as an issue
+    fi
+
+    print_message "  Comparing Local: $local_digest (from $current_image_ref) vs Remote: $remote_digest (from $skopeo_image_ref)" "INFO"
+    if [ "$remote_digest" != "$local_digest" ]; then
+        print_message "  Update Check: Update available for '$current_image_ref'!\n    Current Digest (local): $local_digest\n    New Digest (remote):    $remote_digest" "WARNING"
+        return 1 # Indicates an update is available, treated as a "warning" for summary
+    else
+        print_message "  Update Check: Image '$current_image_ref' is up-to-date." "GOOD"
+        return 0 # No update needed
     fi
 }
 
