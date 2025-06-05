@@ -510,20 +510,57 @@ check_host_memory_usage() {
 }
 
 print_summary() {
-  local container_name_summary issues printed_containers=()
+  local container_name_summary issues issue_emoji
+  local printed_containers=() # To handle unique printing if WARNING_OR_ERROR_CONTAINERS could have dupes
   
+  # --- Host System Stats ---
   print_message "-------------------------- Host System Stats ---------------------------" "SUMMARY"
-  check_host_disk_usage
-  check_host_memory_usage
+  check_host_disk_usage   # This function will use print_message with its own label coloring
+  check_host_memory_usage # This function will use print_message with its own label coloring
 
+  # --- Container Issues Summary ---
   if [ ${#WARNING_OR_ERROR_CONTAINERS[@]} -gt 0 ]; then
     print_message "------------------- Summary of Container Issues Found --------------------" "SUMMARY"
-    print_message "The following containers have warnings or errors: ⚠️" "SUMMARY"
+    # Removed generic emoji from this line, each container will have its own
+    print_message "The following containers have warnings or errors:" "SUMMARY" 
+    
     for container_name_summary in "${WARNING_OR_ERROR_CONTAINERS[@]}"; do
-      if [[ " ${printed_containers[*]} " =~ " ${container_name_summary} " ]]; then continue; fi
+      # Ensure each container is printed once if WARNING_OR_ERROR_CONTAINERS might have duplicates
+      # (current population logic should make it unique, but this is a safeguard)
+      local already_printed=0
+      for pc in "${printed_containers[@]}"; do
+          if [[ "$pc" == "$container_name_summary" ]]; then
+              already_printed=1
+              break
+          fi
+      done
+      if [[ "$already_printed" -eq 1 ]]; then
+          continue
+      fi
       printed_containers+=("$container_name_summary")
+
       issues="${CONTAINER_ISSUES_MAP["$container_name_summary"]:-Unknown Issue}"
-      print_message "- ${container_name_summary} ❌ (${COLOR_BLUE}Issues:${COLOR_RESET} ${issues})" "WARNING"
+      
+      # Determine emoji based on a priority of issues
+      issue_emoji="❌" # Default emoji
+
+      if [[ "$issues" == *"Status"* ]]; then
+        issue_emoji="🛑"
+      elif [[ "$issues" == *"Restarts"* ]]; then
+        issue_emoji="🔥"
+      elif [[ "$issues" == *"Logs"* ]]; then # Prioritizing Logs as per your suggestion context
+        issue_emoji="📜"
+      elif [[ "$issues" == *"Update"* ]]; then # Then Updates
+        issue_emoji="🔄"
+      elif [[ "$issues" == *"Resources"* ]]; then
+        issue_emoji="📈"
+      elif [[ "$issues" == *"Disk"* ]]; then
+        issue_emoji="💾"
+      elif [[ "$issues" == *"Network"* ]]; then
+        issue_emoji="🌐"
+      fi
+      
+      print_message "- ${container_name_summary} ${issue_emoji} (${COLOR_BLUE}Issues:${COLOR_RESET} ${issues})" "WARNING"
     done
   else
     print_message "------------------- Summary of Container Issues Found --------------------" "SUMMARY"
