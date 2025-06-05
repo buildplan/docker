@@ -21,6 +21,7 @@
 #   - MEMORY_WARNING_THRESHOLD: Memory usage percentage threshold for warnings.
 #   - DISK_SPACE_THRESHOLD: Disk space usage percentage threshold for warnings (for container mounts).
 #   - NETWORK_ERROR_THRESHOLD: Network error/drop count threshold for warnings.
+#   - HOST_DISK_CHECK_FILESYSTEM: Filesystem path on host to check for disk usage (e.g., "/", "/var/lib/docker"). Default: "/".
 #
 # Usage:
 #   ./docker-container-monitor.sh                           - Monitor based on config (or all running)
@@ -42,8 +43,9 @@ COLOR_RESET="\033[0m"
 COLOR_RED="\033[0;31m"
 COLOR_GREEN="\033[0;32m"
 COLOR_YELLOW="\033[0;33m"
-COLOR_CYAN="\033[0;36m"
-COLOR_MAGENTA="\033[0;35m" # Magenta for Summary
+COLOR_CYAN="\033[0;36m"         # Used for [INFO]
+COLOR_MAGENTA="\033[0;35m"      # Used for [SUMMARY]
+COLOR_BLUE="\033[0;34m"          # Standard Blue for labels/keys
 
 # --- Script Default Configuration Values ---
 _SCRIPT_DEFAULT_LOG_LINES_TO_CHECK=20
@@ -53,6 +55,7 @@ _SCRIPT_DEFAULT_CPU_WARNING_THRESHOLD=80      # Percentage
 _SCRIPT_DEFAULT_MEMORY_WARNING_THRESHOLD=80   # Percentage
 _SCRIPT_DEFAULT_DISK_SPACE_THRESHOLD=80       # Percentage
 _SCRIPT_DEFAULT_NETWORK_ERROR_THRESHOLD=10    # Number of errors/drops
+_SCRIPT_DEFAULT_HOST_DISK_CHECK_FILESYSTEM="/"
 declare -a _SCRIPT_DEFAULT_CONTAINER_NAMES_ARRAY=()
 
 # Initialize working configuration variables from script defaults
@@ -63,13 +66,13 @@ CPU_WARNING_THRESHOLD="$_SCRIPT_DEFAULT_CPU_WARNING_THRESHOLD"
 MEMORY_WARNING_THRESHOLD="$_SCRIPT_DEFAULT_MEMORY_WARNING_THRESHOLD"
 DISK_SPACE_THRESHOLD="$_SCRIPT_DEFAULT_DISK_SPACE_THRESHOLD"
 NETWORK_ERROR_THRESHOLD="$_SCRIPT_DEFAULT_NETWORK_ERROR_THRESHOLD"
+HOST_DISK_CHECK_FILESYSTEM="$_SCRIPT_DEFAULT_HOST_DISK_CHECK_FILESYSTEM"
 declare -a CONTAINER_NAMES_FROM_CONFIG_FILE=()
 
 # --- Source Configuration File (config.sh) ---
-# config.sh is expected to define VARNAME_DEFAULT variables.
 _CONFIG_FILE_PATH="$(cd "$(dirname "$0")" && pwd)/config.sh"
 if [ -f "$_CONFIG_FILE_PATH" ]; then
-  source "$_CONFIG_FILE_PATH" # This should define LOG_LINES_TO_CHECK_DEFAULT, etc.
+  source "$_CONFIG_FILE_PATH" # Expects VARNAME_DEFAULT variables
 
   LOG_LINES_TO_CHECK="${LOG_LINES_TO_CHECK_DEFAULT:-$LOG_LINES_TO_CHECK}"
   CHECK_FREQUENCY_MINUTES="${CHECK_FREQUENCY_MINUTES_DEFAULT:-$CHECK_FREQUENCY_MINUTES}"
@@ -78,6 +81,8 @@ if [ -f "$_CONFIG_FILE_PATH" ]; then
   MEMORY_WARNING_THRESHOLD="${MEMORY_WARNING_THRESHOLD_DEFAULT:-$MEMORY_WARNING_THRESHOLD}"
   DISK_SPACE_THRESHOLD="${DISK_SPACE_THRESHOLD_DEFAULT:-$DISK_SPACE_THRESHOLD}"
   NETWORK_ERROR_THRESHOLD="${NETWORK_ERROR_THRESHOLD_DEFAULT:-$NETWORK_ERROR_THRESHOLD}"
+  HOST_DISK_CHECK_FILESYSTEM="${HOST_DISK_CHECK_FILESYSTEM_DEFAULT:-$HOST_DISK_CHECK_FILESYSTEM}"
+
 
   if declare -p CONTAINER_NAMES_DEFAULT &>/dev/null && [[ "$(declare -p CONTAINER_NAMES_DEFAULT)" == "declare -a"* ]]; then
     if [ ${#CONTAINER_NAMES_DEFAULT[@]} -gt 0 ]; then
@@ -85,11 +90,10 @@ if [ -f "$_CONFIG_FILE_PATH" ]; then
     fi
   fi
 else
-  # Using echo here as print_message might not be defined yet if this structure was changed.
   echo -e "${COLOR_YELLOW}[WARNING]${COLOR_RESET} Configuration file '$_CONFIG_FILE_PATH' not found. Using script defaults or environment variables."
 fi
 
-# --- Override with Environment Variables (highest precedence for these settings) ---
+# --- Override with Environment Variables (highest precedence) ---
 LOG_LINES_TO_CHECK="${LOG_LINES_TO_CHECK:-$LOG_LINES_TO_CHECK}"
 CHECK_FREQUENCY_MINUTES="${CHECK_FREQUENCY_MINUTES:-$CHECK_FREQUENCY_MINUTES}"
 LOG_FILE="${LOG_FILE:-$LOG_FILE}"
@@ -97,33 +101,22 @@ CPU_WARNING_THRESHOLD="${CPU_WARNING_THRESHOLD:-$CPU_WARNING_THRESHOLD}"
 MEMORY_WARNING_THRESHOLD="${MEMORY_WARNING_THRESHOLD:-$MEMORY_WARNING_THRESHOLD}"
 DISK_SPACE_THRESHOLD="${DISK_SPACE_THRESHOLD:-$DISK_SPACE_THRESHOLD}"
 NETWORK_ERROR_THRESHOLD="${NETWORK_ERROR_THRESHOLD:-$NETWORK_ERROR_THRESHOLD}"
+HOST_DISK_CHECK_FILESYSTEM="${HOST_DISK_CHECK_FILESYSTEM:-$HOST_DISK_CHECK_FILESYSTEM}"
 # CONTAINER_NAMES (env var, comma-separated string) is processed later in main execution.
 
 # --- Prerequisite Checks ---
-if ! command -v docker >/dev/null 2>&1; then
-    echo -e "${COLOR_RED}[FATAL]${COLOR_RESET} Docker command not found. Please install Docker." >&2
-    exit 1
-fi
-if ! command -v jq >/dev/null 2>&1; then
-    echo -e "${COLOR_RED}[FATAL]${COLOR_RESET} jq command not found. Please install jq." >&2
-    exit 1
-fi
-if ! command -v awk >/dev/null 2>&1; then # awk is used for float comparisons
-    echo -e "${COLOR_RED}[FATAL]${COLOR_RESET} awk command not found. Please install awk (usually part of gawk or mawk)." >&2
-    exit 1
-fi
-if ! command -v timeout >/dev/null 2>&1; then # timeout is used for docker exec
-    echo -e "${COLOR_RED}[FATAL]${COLOR_RESET} timeout command not found. Please install coreutils." >&2
-    exit 1
-fi
-# Skopeo is checked within check_for_updates as it's specific to that function.
+# (docker, jq, awk, timeout checks remain the same as previous version)
+if ! command -v docker >/dev/null 2>&1; then echo -e "${COLOR_RED}[FATAL]${COLOR_RESET} Docker command not found." >&2; exit 1; fi
+if ! command -v jq >/dev/null 2>&1; then echo -e "${COLOR_RED}[FATAL]${COLOR_RESET} jq command not found." >&2; exit 1; fi
+if ! command -v awk >/dev/null 2>&1; then echo -e "${COLOR_RED}[FATAL]${COLOR_RESET} awk command not found." >&2; exit 1; fi
+if ! command -v timeout >/dev/null 2>&1; then echo -e "${COLOR_RED}[FATAL]${COLOR_RESET} timeout command not found." >&2; exit 1; fi
 
 # --- Validate Configuration Values ---
 if ! [[ "$LOG_LINES_TO_CHECK" =~ ^[0-9]+$ ]] || [ "$LOG_LINES_TO_CHECK" -le 0 ]; then
-    echo -e "${COLOR_YELLOW}[WARNING]${COLOR_RESET} Invalid LOG_LINES_TO_CHECK value ('$LOG_LINES_TO_CHECK'). Using script default: $_SCRIPT_DEFAULT_LOG_LINES_TO_CHECK." >&2
+    echo -e "${COLOR_YELLOW}[WARNING]${COLOR_RESET} Invalid LOG_LINES_TO_CHECK ('$LOG_LINES_TO_CHECK'). Defaulting to $_SCRIPT_DEFAULT_LOG_LINES_TO_CHECK." >&2
     LOG_LINES_TO_CHECK="$_SCRIPT_DEFAULT_LOG_LINES_TO_CHECK"
 fi
-# Add similar validation for other numeric threshold variables if desired. For brevity, omitted here but recommended.
+# Add similar validation for CPU_WARNING_THRESHOLD, MEMORY_WARNING_THRESHOLD, DISK_SPACE_THRESHOLD, NETWORK_ERROR_THRESHOLD if they must be numeric.
 
 # --- Functions ---
 
@@ -131,7 +124,7 @@ print_message() {
   local message="$1"
   local color_type="$2"
   local color_code=""
-  local log_output_no_color=""
+  local log_output_no_color="" # For logging to file without color codes
 
   case "$color_type" in
     "INFO") color_code="$COLOR_CYAN";;
@@ -142,13 +135,20 @@ print_message() {
     *) color_code="$COLOR_RESET"; color_type="NONE";;
   esac
 
+  # Strip existing ANSI codes from message before adding new ones for logging
+  # This is a simple approach; more robust would be a sed regex for all ANSI codes
+  log_output_no_color=$(echo "$message" | sed -r "s/\x1B\[[0-9;]*[mK]//g")
+
+
   if [ "$color_type" = "NONE" ]; then
-    echo -e "${message}"
-    log_output_no_color="${message}"
+    echo -e "${message}" # Already includes colors from caller
+    # log_output_no_color is already set
   else
+    # For terminal output, allow message to have its own colors, then wrap with status color
     local colored_message="${color_code}[${color_type}]${COLOR_RESET} ${message}"
     echo -e "${colored_message}"
-    log_output_no_color="[${color_type}] ${message}"
+    # For log output, add type prefix but use the color-stripped message
+    log_output_no_color="[${color_type}] ${log_output_no_color}"
   fi
 
   if [ -n "$LOG_FILE" ]; then
@@ -157,10 +157,9 @@ print_message() {
     if [ ! -d "$log_dir" ]; then
         mkdir -p "$log_dir" &>/dev/null
     fi
-    if touch "$LOG_FILE" &>/dev/null; then # Check writability and existence
+    if touch "$LOG_FILE" &>/dev/null; then
         echo "$(date '+%Y-%m-%d %H:%M:%S') ${log_output_no_color}" >> "$LOG_FILE"
     else
-        # Avoid recursive calls to print_message if LOG_FILE itself is the problem
         echo -e "${COLOR_RED}[ERROR]${COLOR_RESET} Cannot write to LOG_FILE ('$LOG_FILE'). Logging to file disabled for this message." >&2
     fi
   fi
@@ -169,7 +168,6 @@ print_message() {
 check_container_status() {
   local container_name="$1"
   local inspect_data="$2"
-  # CPU and Mem percentages are now handled by check_resource_usage, but kept for context in status messages
   local cpu_for_status_msg="$3" 
   local mem_for_status_msg="$4"
   local status health_status detailed_health
@@ -181,24 +179,24 @@ check_container_status() {
   fi
 
   if [ "$status" != "running" ]; then
-    print_message "  Status: Not running (Status: $status, Health: $health_status, CPU: $cpu_for_status_msg, Mem: $mem_for_status_msg)" "DANGER"
+    print_message "  ${COLOR_BLUE}Status:${COLOR_RESET} Not running (Status: $status, Health: $health_status, CPU: $cpu_for_status_msg, Mem: $mem_for_status_msg)" "DANGER"
     return 1
   else
     if [ "$health_status" = "healthy" ]; then
-      print_message "  Status: Running and healthy (Status: $status, Health: $health_status, CPU: $cpu_for_status_msg, Mem: $mem_for_status_msg)" "GOOD"
+      print_message "  ${COLOR_BLUE}Status:${COLOR_RESET} Running and healthy (Status: $status, Health: $health_status, CPU: $cpu_for_status_msg, Mem: $mem_for_status_msg)" "GOOD"
       return 0
     elif [ "$health_status" = "unhealthy" ]; then
-      print_message "  Status: Running but UNHEALTHY (Status: $status, Health: $health_status, CPU: $cpu_for_status_msg, Mem: $mem_for_status_msg)" "DANGER"
+      print_message "  ${COLOR_BLUE}Status:${COLOR_RESET} Running but UNHEALTHY (Status: $status, Health: $health_status, CPU: $cpu_for_status_msg, Mem: $mem_for_status_msg)" "DANGER"
       detailed_health=$(jq -r '.[0].State.Health | tojson' <<< "$inspect_data")
       if [ -n "$detailed_health" ] && [ "$detailed_health" != "null" ]; then
-        print_message "    Detailed Health Info: $detailed_health" "WARNING"
+        print_message "    ${COLOR_BLUE}Detailed Health Info:${COLOR_RESET} $detailed_health" "WARNING"
       fi
       return 1
     elif [ "$health_status" = "not configured" ]; then
-      print_message "  Status: Running (Status: $status, Health: $health_status, CPU: $cpu_for_status_msg, Mem: $mem_for_status_msg)" "GOOD"
+      print_message "  ${COLOR_BLUE}Status:${COLOR_RESET} Running (Status: $status, Health: $health_status, CPU: $cpu_for_status_msg, Mem: $mem_for_status_msg)" "GOOD"
       return 0
     else
-      print_message "  Status: Running (Status: $status, Health: $health_status, CPU: $cpu_for_status_msg, Mem: $mem_for_status_msg)" "WARNING"
+      print_message "  ${COLOR_BLUE}Status:${COLOR_RESET} Running (Status: $status, Health: $health_status, CPU: $cpu_for_status_msg, Mem: $mem_for_status_msg)" "WARNING"
       return 1
     fi
   fi
@@ -213,47 +211,45 @@ check_container_restarts() {
   is_restarting=$(jq -r '.[0].State.Restarting' <<< "$inspect_data")
 
   if [ "$is_restarting" = "true" ]; then
-    print_message "  Restart Status: Container '$container_name' is currently restarting." "WARNING"
+    print_message "  ${COLOR_BLUE}Restart Status:${COLOR_RESET} Container '$container_name' is currently restarting." "WARNING"
     return 1
   elif [ "$restart_count" -gt 0 ]; then
-    print_message "  Restart Status: Container '$container_name' has restarted $restart_count times." "WARNING"
+    print_message "  ${COLOR_BLUE}Restart Status:${COLOR_RESET} Container '$container_name' has restarted $restart_count times." "WARNING"
     return 1
   else
-    print_message "  Restart Status: No unexpected restarts detected for '$container_name'." "GOOD"
+    print_message "  ${COLOR_BLUE}Restart Status:${COLOR_RESET} No unexpected restarts detected for '$container_name'." "GOOD"
     return 0
   fi
 }
 
 check_resource_usage() {
-  local container_name="$1" # For messages, if needed
-  local cpu_percent="$2"    # Already extracted, % removed
-  local mem_percent="$3"    # Already extracted, % removed
+  local container_name="$1" 
+  local cpu_percent="$2"    
+  local mem_percent="$3"    
   local issues_found=0
 
-  # Check CPU usage
   if [[ "$cpu_percent" =~ ^[0-9.]+$ ]]; then
     if awk -v cpu="$cpu_percent" -v threshold="$CPU_WARNING_THRESHOLD" 'BEGIN {exit !(cpu > threshold)}'; then
-      print_message "  CPU Usage: High CPU usage detected (${cpu_percent}% > ${CPU_WARNING_THRESHOLD}% threshold)" "WARNING"
+      print_message "  ${COLOR_BLUE}CPU Usage:${COLOR_RESET} High CPU usage detected (${cpu_percent}% > ${CPU_WARNING_THRESHOLD}% threshold)" "WARNING"
       issues_found=1
     else
-      print_message "  CPU Usage: Normal (${cpu_percent}%)" "INFO"
+      print_message "  ${COLOR_BLUE}CPU Usage:${COLOR_RESET} Normal (${cpu_percent}%)" "INFO"
     fi
   else
-    print_message "  CPU Usage: Could not determine CPU usage (value: ${cpu_percent})" "WARNING"
-    issues_found=1 # Consider indeterminate usage an issue
+    print_message "  ${COLOR_BLUE}CPU Usage:${COLOR_RESET} Could not determine CPU usage (value: ${cpu_percent})" "WARNING"
+    issues_found=1 
   fi
 
-  # Check Memory usage
   if [[ "$mem_percent" =~ ^[0-9.]+$ ]]; then
     if awk -v mem="$mem_percent" -v threshold="$MEMORY_WARNING_THRESHOLD" 'BEGIN {exit !(mem > threshold)}'; then
-      print_message "  Memory Usage: High memory usage detected (${mem_percent}% > ${MEMORY_WARNING_THRESHOLD}% threshold)" "WARNING"
+      print_message "  ${COLOR_BLUE}Memory Usage:${COLOR_RESET} High memory usage detected (${mem_percent}% > ${MEMORY_WARNING_THRESHOLD}% threshold)" "WARNING"
       issues_found=1
     else
-      print_message "  Memory Usage: Normal (${mem_percent}%)" "INFO"
+      print_message "  ${COLOR_BLUE}Memory Usage:${COLOR_RESET} Normal (${mem_percent}%)" "INFO"
     fi
   else
-    print_message "  Memory Usage: Could not determine memory usage (value: ${mem_percent})" "WARNING"
-    issues_found=1 # Consider indeterminate usage an issue
+    print_message "  ${COLOR_BLUE}Memory Usage:${COLOR_RESET} Could not determine memory usage (value: ${mem_percent})" "WARNING"
+    issues_found=1 
   fi
 
   return $issues_found
@@ -263,14 +259,14 @@ check_disk_space() {
   local container_name="$1"
   local inspect_data="$2"
   local issues_found=0
-  local i mp_destination mp_type disk_usage # loop variables
+  local i mp_destination mp_type disk_usage 
   local num_mounts
-  local mount_processed_for_df_check=false # Flag to see if any mount was actually df-checked
+  local mount_processed_for_df_check=false
 
   num_mounts=$(jq -r '.[0].Mounts | length // 0' <<< "$inspect_data" 2>/dev/null)
 
   if ! [[ "$num_mounts" =~ ^[0-9]+$ ]] || [ "$num_mounts" -eq 0 ]; then
-    print_message "  Disk Space: No mounted volumes found for '$container_name' or error parsing mounts." "INFO"
+    print_message "  ${COLOR_BLUE}Disk Space:${COLOR_RESET} No mounted volumes found for '$container_name' or error parsing mounts." "INFO"
     return 0
   fi
 
@@ -278,268 +274,188 @@ check_disk_space() {
     mp_destination=$(jq -r ".[0].Mounts[$i].Destination // empty" <<< "$inspect_data" 2>/dev/null)
     mp_type=$(jq -r ".[0].Mounts[$i].Type // empty" <<< "$inspect_data" 2>/dev/null)
 
-    if [ -z "$mp_destination" ]; then
-        continue
-    fi
+    if [ -z "$mp_destination" ]; then continue; fi
 
-    # --- Enhanced Filter for special/virtual paths ---
-    # Add more patterns here if needed for your specific environment
     if [[ "$mp_destination" == *".sock" ]] || \
        [[ "$mp_destination" == "/proc" ]] || [[ "$mp_destination" == "/proc/"* ]] || \
        [[ "$mp_destination" == "/sys" ]]  || [[ "$mp_destination" == "/sys/"* ]] || \
        [[ "$mp_destination" == "/dev" ]]  || [[ "$mp_destination" == "/dev/"* ]] || \
        [[ "$mp_destination" == "/host/proc" ]] || [[ "$mp_destination" == "/host/proc/"* ]] || \
        [[ "$mp_destination" == "/host/sys" ]]  || [[ "$mp_destination" == "/host/sys/"* ]] ; then
-      print_message "  Disk Space: Skipping disk usage percentage check for special/virtual path '$mp_destination' (Type: '$mp_type') in '$container_name'." "INFO"
-      continue # Skip to the next mount
+      print_message "  ${COLOR_BLUE}Disk Space:${COLOR_RESET} Skipping disk usage percentage check for special/virtual path '$mp_destination' (Type: '$mp_type') in '$container_name'." "INFO"
+      continue
     fi
     
-    mount_processed_for_df_check=true # Mark that we are attempting a df check for this mount
-
+    mount_processed_for_df_check=true
     disk_usage=$(timeout 5 docker exec "$container_name" df -P "$mp_destination" 2>/dev/null | awk 'NR==2 {val=$(NF-1); sub(/%$/,"",val); print val}')
     
     if ! [[ "$disk_usage" =~ ^[0-9]+$ ]]; then
-      print_message "  Disk Space: Could not accurately check usage for '$mp_destination' in '$container_name' (Type: '$mp_type', Raw DF Value: '$disk_usage')." "WARNING"
+      print_message "  ${COLOR_BLUE}Disk Space:${COLOR_RESET} Could not accurately check usage for '$mp_destination' in '$container_name' (Type: '$mp_type', Raw DF Value: '$disk_usage')." "WARNING"
       issues_found=1
       continue
     fi
 
     if [ "$disk_usage" -ge "$DISK_SPACE_THRESHOLD" ]; then
-      print_message "  Disk Space: High usage ($disk_usage%) at '$mp_destination' in '$container_name' (Threshold: $DISK_SPACE_THRESHOLD%)" "WARNING"
+      print_message "  ${COLOR_BLUE}Disk Space:${COLOR_RESET} High usage ($disk_usage%) at '$mp_destination' in '$container_name' (Threshold: $DISK_SPACE_THRESHOLD%)" "WARNING"
       issues_found=1
     else
-      print_message "  Disk Space: Normal usage ($disk_usage%) at '$mp_destination' in '$container_name'." "INFO"
+      print_message "  ${COLOR_BLUE}Disk Space:${COLOR_RESET} Normal usage ($disk_usage%) at '$mp_destination' in '$container_name'." "INFO"
     fi
   done
 
   if ! $mount_processed_for_df_check && [ "$num_mounts" -gt 0 ]; then
-      print_message "  Disk Space: No mounts deemed suitable for percentage-based usage check in '$container_name' (out of $num_mounts total mounts)." "INFO"
+      print_message "  ${COLOR_BLUE}Disk Space:${COLOR_RESET} No mounts deemed suitable for percentage-based usage check in '$container_name' (out of $num_mounts total mounts)." "INFO"
   fi
-
   return $issues_found
 }
 
 check_network() {
-  local container_name="$1"
-  local issues_found=0
-  local network_stats line interface errors packets error_rate # loop variables
-  local data_part # For parsing /proc/net/dev line
-  # Variables for fields from /proc/net/dev
+  local container_name="$1"; local issues_found=0
+  local network_stats line interface errors packets error_rate data_part
   local _r_bytes _r_packets _r_errs _r_drop _r_fifo _r_frame _r_compressed _r_multicast
   local _t_bytes _t_packets _t_errs _t_drop _t_fifo _t_colls _t_carrier _t_compressed
+  local network_issue_reported_for_container=false
 
   network_stats=$(timeout 5 docker exec "$container_name" cat /proc/net/dev 2>/dev/null)
-
   if [ -z "$network_stats" ]; then
-    print_message "  Network: Could not retrieve network statistics for '$container_name'." "WARNING"
-    return 1
+    print_message "  ${COLOR_BLUE}Network:${COLOR_RESET} Could not retrieve network statistics for '$container_name'." "WARNING"; return 1;
   fi
 
-  local network_issue_reported_for_container=false
   while IFS= read -r line; do
     if [[ "$line" == *:* ]]; then
       interface=$(echo "$line" | awk -F ':' '{print $1}' | sed 's/^[ \t]*//;s/[ \t]*$//')
       data_part=$(echo "$line" | cut -d':' -f2-)
-      
-      # Use 'read' to parse the fields robustly
       read -r _r_bytes _r_packets _r_errs _r_drop _r_fifo _r_frame _r_compressed _r_multicast \
                 _t_bytes _t_packets _t_errs _t_drop _t_fifo _t_colls _t_carrier _t_compressed <<< "$data_part"
-      
-      # Check if fields are numeric; if not, skip this interface line (might be malformed)
-      if ! [[ "$_r_errs" =~ ^[0-9]+$ && "$_t_drop" =~ ^[0-9]+$ && \
-              "$_r_packets" =~ ^[0-9]+$ && "$_t_packets" =~ ^[0-9]+$ ]]; then
-          print_message "  Network: Malformed stats line for interface '$interface' in '$container_name'. Skipping." "INFO"
-          continue
+      if ! [[ "$_r_errs" =~ ^[0-9]+$ && "$_t_drop" =~ ^[0-9]+$ && "$_r_packets" =~ ^[0-9]+$ && "$_t_packets" =~ ^[0-9]+$ ]]; then
+          print_message "  ${COLOR_BLUE}Network:${COLOR_RESET} Malformed stats line for interface '$interface' in '$container_name'. Skipping." "INFO"; continue;
       fi
-
-      errors=$((_r_errs + _t_drop))
-      packets=$((_r_packets + _t_packets))
-
+      errors=$((_r_errs + _t_drop)); packets=$((_r_packets + _t_packets))
       if [ "$errors" -gt "$NETWORK_ERROR_THRESHOLD" ]; then
-        print_message "  Network: Interface '$interface' in '$container_name' has $errors errors/drops (Threshold: $NETWORK_ERROR_THRESHOLD)." "WARNING"
-        issues_found=1
-        network_issue_reported_for_container=true
+        print_message "  ${COLOR_BLUE}Network:${COLOR_RESET} Interface '$interface' in '$container_name' has $errors errors/drops (Threshold: $NETWORK_ERROR_THRESHOLD)." "WARNING"
+        issues_found=1; network_issue_reported_for_container=true;
       fi
-
       if [ "$packets" -gt 0 ] && [ "$errors" -gt 0 ]; then
         error_rate=$(awk -v err="$errors" -v pkt="$packets" 'BEGIN {if (pkt > 0) printf "%.2f", (err * 100 / pkt); else print "0.00"}')
-        if awk -v rate="$error_rate" -v threshold="1.0" 'BEGIN {exit !(rate > threshold)}'; then # Example: 1.0% error rate threshold
-          print_message "  Network: Interface '$interface' in '$container_name' has high error rate ($error_rate%)." "WARNING"
-          issues_found=1
-          network_issue_reported_for_container=true
+        if awk -v rate="$error_rate" -v threshold="1.0" 'BEGIN {exit !(rate > threshold)}'; then
+          print_message "  ${COLOR_BLUE}Network:${COLOR_RESET} Interface '$interface' in '$container_name' has high error rate ($error_rate%)." "WARNING"
+          issues_found=1; network_issue_reported_for_container=true;
         fi
       fi
     fi
-  done <<< "$(tail -n +3 <<< "$network_stats")" # Skip first two header lines
-
-  if [ $issues_found -eq 0 ] && ! $network_issue_reported_for_container ; then # Only print "no issues" if none were warned about
-      print_message "  Network: No significant network issues detected for '$container_name'." "INFO"
+  done <<< "$(tail -n +3 <<< "$network_stats")"
+  if [ $issues_found -eq 0 ] && ! $network_issue_reported_for_container ; then
+      print_message "  ${COLOR_BLUE}Network:${COLOR_RESET} No significant network issues detected for '$container_name'." "INFO"
   fi
   return $issues_found
 }
 
 check_for_updates() {
-    local container_name="$1"
-    local current_image_ref="$2"
+    local container_name="$1"; local current_image_ref="$2"
     local registry_host image_path_for_skopeo tag image_name_no_tag first_part skopeo_image_ref
     local search_pattern_in_repodigests local_digest_line local_digest skopeo_output skopeo_exit_code remote_digest
-
     tag="latest"
 
     if [[ "$current_image_ref" == *@sha256:* ]]; then
-        print_message "  Update Check: Container '$container_name' is running image pinned by digest ($current_image_ref). Skipping tag-based update check." "INFO"
-        return 0
+        print_message "  ${COLOR_BLUE}Update Check:${COLOR_RESET} Container '$container_name' is running image pinned by digest ($current_image_ref). Skipping." "INFO"; return 0;
     fi
     if [[ "$current_image_ref" =~ ^sha256:[0-9a-fA-F]{64}$ ]]; then
-        print_message "  Update Check: Container '$container_name' is running image by ID ($current_image_ref). Cannot determine registry." "INFO"
-        return 0
+        print_message "  ${COLOR_BLUE}Update Check:${COLOR_RESET} Container '$container_name' is running image by ID ($current_image_ref). Cannot determine registry." "INFO"; return 0;
     fi
-
     image_name_no_tag="$current_image_ref"
     if [[ "$current_image_ref" == *":"* ]]; then
         if [[ "${current_image_ref##*:}" =~ ^[0-9a-fA-F]{7,}$ && "${current_image_ref}" == *@* ]]; then
-            print_message "  Update Check: Image ref '$current_image_ref' for '$container_name' appears digest-pinned. Skipping tag-based update check." "INFO"
-            return 0
+            print_message "  ${COLOR_BLUE}Update Check:${COLOR_RESET} Image ref '$current_image_ref' for '$container_name' appears digest-pinned. Skipping." "INFO"; return 0;
         fi
-        tag="${current_image_ref##*:}"
-        image_name_no_tag="${current_image_ref%:*}"
+        tag="${current_image_ref##*:}"; image_name_no_tag="${current_image_ref%:*}";
     fi
-
     if [[ "$image_name_no_tag" == *"/"* ]]; then
         first_part=$(echo "$image_name_no_tag" | cut -d'/' -f1)
         if [[ "$first_part" == *"."* ]] || [[ "$first_part" == "localhost" ]] || [[ "$first_part" == *":"* ]]; then
-            registry_host="$first_part"
-            image_path_for_skopeo=$(echo "$image_name_no_tag" | cut -d'/' -f2-)
+            registry_host="$first_part"; image_path_for_skopeo=$(echo "$image_name_no_tag" | cut -d'/' -f2-);
         else
-            registry_host="registry-1.docker.io"
-            image_path_for_skopeo="$image_name_no_tag"
+            registry_host="registry-1.docker.io"; image_path_for_skopeo="$image_name_no_tag";
         fi
     else
-        registry_host="registry-1.docker.io"
-        image_path_for_skopeo="library/$image_name_no_tag"
+        registry_host="registry-1.docker.io"; image_path_for_skopeo="library/$image_name_no_tag";
     fi
-
     skopeo_image_ref="docker://$registry_host/$image_path_for_skopeo:$tag"
-
     if ! command -v skopeo >/dev/null 2>&1; then
-        print_message "  Update Check: skopeo not installed. Cannot check updates for '$container_name'." "DANGER"
-        return 1
+        print_message "  ${COLOR_BLUE}Update Check:${COLOR_RESET} skopeo not installed. Cannot check updates for '$container_name'." "DANGER"; return 1;
     fi
-
-    # Inspect the image name/tag directly for its RepoDigests
     search_pattern_in_repodigests="^${registry_host}/${image_path_for_skopeo}@"
     local_digest_line=$(docker inspect -f '{{range .RepoDigests}}{{.}}{{println}}{{end}}' "$current_image_ref" 2>/dev/null | grep -E "$search_pattern_in_repodigests" | head -n 1)
     local_digest=""
     if [[ -n "$local_digest_line" && "$local_digest_line" == *@* ]]; then
         local_digest="${local_digest_line##*@}"
     else
-        print_message "  Update Check: No matching local RepoDigest for '$current_image_ref' via pattern '$search_pattern_in_repodigests'. Fallback: first RepoDigest." "INFO"
+        print_message "  ${COLOR_BLUE}Update Check:${COLOR_RESET} No matching local RepoDigest for '$current_image_ref' via pattern. Fallback: first RepoDigest." "INFO"
         local_digest_line=$(docker inspect -f '{{index .RepoDigests 0}}' "$current_image_ref" 2>/dev/null)
-        if [[ -n "$local_digest_line" && "$local_digest_line" == *@* ]]; then
-            local_digest="${local_digest_line##*@}"
-        fi
+        if [[ -n "$local_digest_line" && "$local_digest_line" == *@* ]]; then local_digest="${local_digest_line##*@}"; fi
     fi
-
     if [ -z "$local_digest" ]; then
-        print_message "  Update Check: Failed to get local digest for '$current_image_ref' ($registry_host/$image_path_for_skopeo). Cannot check updates." "WARNING"
-        return 1
+        print_message "  ${COLOR_BLUE}Update Check:${COLOR_RESET} Failed to get local digest for '$current_image_ref'. Cannot check." "WARNING"; return 1;
     fi
-
-    print_message "  Update Check: Checking remote '$skopeo_image_ref'..." "INFO"
-    skopeo_output=$(skopeo inspect "$skopeo_image_ref" 2>&1)
-    skopeo_exit_code=$?
+    print_message "  ${COLOR_BLUE}Update Check:${COLOR_RESET} Checking remote '$skopeo_image_ref'..." "INFO"
+    skopeo_output=$(skopeo inspect "$skopeo_image_ref" 2>&1); skopeo_exit_code=$?
     remote_digest=""
     if [ $skopeo_exit_code -eq 0 ]; then
         remote_digest=$(jq -r '.Digest' <<< "$skopeo_output")
         if [ "$remote_digest" == "null" ] || [ -z "$remote_digest" ]; then
-            print_message "  Update Check: skopeo inspect for '$skopeo_image_ref' gave no digest." "DANGER"
-            print_message "    Skopeo output: $skopeo_output" "INFO"
-            return 1
+            print_message "  ${COLOR_BLUE}Update Check:${COLOR_RESET} skopeo inspect for '$skopeo_image_ref' gave no digest." "DANGER"
+            print_message "    Skopeo output: $skopeo_output" "INFO"; return 1;
         fi
     else
-        print_message "  Update Check: Error inspecting remote '$skopeo_image_ref'." "DANGER"
-        if echo "$skopeo_output" | grep -qiE "unauthorized|authentication|denied|forbidden|credentials"; then
-            print_message "    Error: Authentication failed for '$registry_host'." "DANGER"
-        elif echo "$skopeo_output" | grep -qiE "manifest unknown|not found|no such host"; then
-            print_message "    Error: Image/tag not found at remote, or registry host invalid: '$skopeo_image_ref'." "DANGER"
-        else
-            print_message "    Skopeo failed (code $skopeo_exit_code)." "WARNING"
-        fi
-        print_message "    Full skopeo error: $skopeo_output" "INFO"
-        return 1
+        print_message "  ${COLOR_BLUE}Update Check:${COLOR_RESET} Error inspecting remote '$skopeo_image_ref'." "DANGER"
+        if echo "$skopeo_output" | grep -qiE "unauthorized|authentication|denied|forbidden|credentials"; then print_message "    ${COLOR_BLUE}Error:${COLOR_RESET} Authentication failed for '$registry_host'." "DANGER";
+        elif echo "$skopeo_output" | grep -qiE "manifest unknown|not found|no such host"; then print_message "    ${COLOR_BLUE}Error:${COLOR_RESET} Image/tag not found or registry invalid: '$skopeo_image_ref'." "DANGER";
+        else print_message "    ${COLOR_BLUE}Skopeo failed${COLOR_RESET} (code $skopeo_exit_code)." "WARNING"; fi
+        print_message "    Full skopeo error: $skopeo_output" "INFO"; return 1;
     fi
-
-    print_message "  Comparing Local: $local_digest (image: $current_image_ref) vs Remote: $remote_digest (image: $skopeo_image_ref)" "INFO"
+    print_message "  ${COLOR_BLUE}Comparing Local:${COLOR_RESET} $local_digest (image: $current_image_ref) vs ${COLOR_BLUE}Remote:${COLOR_RESET} $remote_digest (image: $skopeo_image_ref)" "INFO"
     if [ "$remote_digest" != "$local_digest" ]; then
-        print_message "  Update Check: Update available for '$current_image_ref'!\n  Local Digest: $local_digest\n  Remote Digest: $remote_digest" "WARNING"
-        return 1
+        print_message "  ${COLOR_BLUE}Update Check:${COLOR_RESET} Update available for '$current_image_ref'!\n  ${COLOR_BLUE}Local Digest:${COLOR_RESET} $local_digest\n  ${COLOR_BLUE}Remote Digest:${COLOR_RESET} $remote_digest" "WARNING"; return 1;
     else
-        print_message "  Update Check: Image '$current_image_ref' is up-to-date." "GOOD"
-        return 0
+        print_message "  ${COLOR_BLUE}Update Check:${COLOR_RESET} Image '$current_image_ref' is up-to-date." "GOOD"; return 0;
     fi
 }
 
 check_logs() {
-  local container_name="$1"
-  local print_to_stdout="${2:-false}"
-  local filter_errors="${3:-false}"
+  local container_name="$1"; local print_to_stdout="${2:-false}"; local filter_errors="${3:-false}"
   local raw_logs docker_logs_status logs_to_display_or_analyze issues_found_by_grep
 
-  raw_logs=$(docker logs --tail "$LOG_LINES_TO_CHECK" "$container_name" 2>&1)
-  docker_logs_status=$?
-
+  raw_logs=$(docker logs --tail "$LOG_LINES_TO_CHECK" "$container_name" 2>&1); docker_logs_status=$?
   if [ $docker_logs_status -ne 0 ]; then
-    print_message "  Log Check: Error retrieving logs for '$container_name' (status: $docker_logs_status)." "DANGER"
-    print_message "    Docker error: $raw_logs" "INFO"
-    return 1
+    print_message "  ${COLOR_BLUE}Log Check:${COLOR_RESET} Error retrieving logs for '$container_name' (status: $docker_logs_status)." "DANGER"
+    print_message "    Docker error: $raw_logs" "INFO"; return 1;
   fi
-
-  logs_to_display_or_analyze="$raw_logs"
-  issues_found_by_grep=false
-
+  logs_to_display_or_analyze="$raw_logs"; issues_found_by_grep=false
   if [ "$filter_errors" = "true" ]; then
     if echo "$raw_logs" | grep -q -i -E 'error|panic|fail|fatal'; then
-      logs_to_display_or_analyze=$(echo "$raw_logs" | grep -i -E 'error|panic|fail|fatal')
-      issues_found_by_grep=true
-    else
-      logs_to_display_or_analyze=""
-    fi
+      logs_to_display_or_analyze=$(echo "$raw_logs" | grep -i -E 'error|panic|fail|fatal'); issues_found_by_grep=true;
+    else logs_to_display_or_analyze=""; fi
   fi
-
   if [ "$print_to_stdout" = "true" ]; then
-    if [ "$filter_errors" = "true" ]; then
-      echo "Filtered logs (errors/warnings) for '$container_name' (last $LOG_LINES_TO_CHECK lines):"
-    else
-      echo "Last $LOG_LINES_TO_CHECK log lines for '$container_name':"
-    fi
-    if [ -n "$logs_to_display_or_analyze" ]; then
-      echo "$logs_to_display_or_analyze"
-    else
-      if [ "$filter_errors" = "true" ]; then echo "No lines matching error patterns found.";
+    if [ "$filter_errors" = "true" ]; then echo "Filtered logs (errors/warnings) for '$container_name' (last $LOG_LINES_TO_CHECK lines):";
+    else echo "Last $LOG_LINES_TO_CHECK log lines for '$container_name':"; fi
+    if [ -n "$logs_to_display_or_analyze" ]; then echo "$logs_to_display_or_analyze";
+    else if [ "$filter_errors" = "true" ]; then echo "No lines matching error patterns found.";
       elif [ -z "$raw_logs" ]; then echo "No log output in the last $LOG_LINES_TO_CHECK lines.";
-      else echo "No log output in the last $LOG_LINES_TO_CHECK lines."; fi
-    fi
-    echo "-------------------------"
+      else echo "No log output in the last $LOG_LINES_TO_CHECK lines."; fi; fi
+    echo "-------------------------";
   fi
-
-  if [ "$filter_errors" = "true" ]; then # Usually for CLI 'logs errors' command
-    if [ "$issues_found_by_grep" = "true" ]; then
-      print_message "  Log Check: Errors/warnings found (when filtering)." "WARNING"; return 0;
-    else
-      print_message "  Log Check: No specific errors/warnings found (when filtering)." "GOOD"; return 0;
-    fi
-  else # For main monitoring loop
+  if [ "$filter_errors" = "true" ]; then
+    if [ "$issues_found_by_grep" = "true" ]; then print_message "  ${COLOR_BLUE}Log Check:${COLOR_RESET} Errors/warnings found (when filtering)." "WARNING"; return 0;
+    else print_message "  ${COLOR_BLUE}Log Check:${COLOR_RESET} No specific errors/warnings found (when filtering)." "GOOD"; return 0; fi
+  else
     if [ -n "$raw_logs" ]; then
       if echo "$raw_logs" | grep -q -i -E 'error|panic|fail|fatal'; then
-          print_message "  Log Check: Potential errors/warnings found in recent $LOG_LINES_TO_CHECK lines. Please review." "WARNING"
-          return 1 # Flag for summary
+          print_message "  ${COLOR_BLUE}Log Check:${COLOR_RESET} Potential errors/warnings found in recent $LOG_LINES_TO_CHECK lines. Please review." "WARNING"; return 1;
       else
-          print_message "  Log Check: Logs retrieved (last $LOG_LINES_TO_CHECK lines). No obvious widespread errors found." "GOOD"
-          return 0
+          print_message "  ${COLOR_BLUE}Log Check:${COLOR_RESET} Logs retrieved (last $LOG_LINES_TO_CHECK lines). No obvious widespread errors found." "GOOD"; return 0;
       fi
     else
-      print_message "  Log Check: No log output in last $LOG_LINES_TO_CHECK lines for '$container_name'." "INFO"
-      return 1 # Flag "no logs" as an issue for summary
+      print_message "  ${COLOR_BLUE}Log Check:${COLOR_RESET} No log output in last $LOG_LINES_TO_CHECK lines for '$container_name'." "INFO"; return 1;
     fi
   fi
 }
@@ -554,26 +470,70 @@ save_logs() {
   fi
 }
 
+check_host_disk_usage() {
+    local target_filesystem="${HOST_DISK_CHECK_FILESYSTEM:-/}" 
+    print_message "${COLOR_BLUE}Host Disk Usage ($target_filesystem):${COLOR_RESET}" "INFO"
+    local usage_line size_hr used_hr avail_hr capacity
+    usage_line=$(df -Ph "$target_filesystem" 2>/dev/null | awk 'NR==2')
+    if [ -n "$usage_line" ]; then
+        size_hr=$(echo "$usage_line" | awk '{print $2}')
+        used_hr=$(echo "$usage_line" | awk '{print $3}')
+        avail_hr=$(echo "$usage_line" | awk '{print $4}')
+        capacity=$(echo "$usage_line" | awk '{print $5}' | tr -d '%')
+        if [[ "$capacity" =~ ^[0-9]+$ ]]; then
+             print_message "  - ${COLOR_BLUE}$target_filesystem:${COLOR_RESET} $capacity% used (${COLOR_BLUE}Size:${COLOR_RESET} $size_hr, ${COLOR_BLUE}Used:${COLOR_RESET} $used_hr, ${COLOR_BLUE}Available:${COLOR_RESET} $avail_hr)" "INFO"
+        else
+            print_message "  - ${COLOR_BLUE}Could not parse disk usage percentage for '$target_filesystem'${COLOR_RESET} (Raw line: '$usage_line')" "WARNING"
+        fi
+    else
+        print_message "  - ${COLOR_BLUE}Could not determine disk usage for $target_filesystem${COLOR_RESET}" "WARNING"
+    fi
+}
+
+check_host_memory_usage() {
+    print_message "${COLOR_BLUE}Host Memory Usage:${COLOR_RESET}" "INFO"
+    if command -v free >/dev/null 2>&1; then
+        local mem_line total_mem used_mem free_mem perc_used
+        # Get raw values from free -m (Total: $2, Used: $3, Free: $4 in MB)
+        read -r _ total_mem used_mem free_mem _ < <(free -m | awk 'NR==2') # Bash specific read
+
+        if [[ "$total_mem" =~ ^[0-9]+$ && "$used_mem" =~ ^[0-9]+$ && "$total_mem" -gt 0 ]]; then
+            perc_used=$(awk -v used="$used_mem" -v total="$total_mem" 'BEGIN {printf "%.0f", (used * 100 / total)}')
+            mem_line="${COLOR_BLUE}Total:${COLOR_RESET} ${total_mem}MB, ${COLOR_BLUE}Used:${COLOR_RESET} ${used_mem}MB (${perc_used}%), ${COLOR_BLUE}Free:${COLOR_RESET} ${free_mem}MB"
+            print_message "  - $mem_line" "INFO"
+        else
+            print_message "  - Could not parse memory values from 'free -m' output." "WARNING"
+        fi
+    else
+        print_message "  - 'free' command not found, cannot check host memory." "WARNING"
+    fi
+}
+
 print_summary() {
-  local container_name_summary
+  local container_name_summary issues printed_containers=()
+  
+  print_message "-------------------------- Host System Stats ---------------------------" "SUMMARY"
+  check_host_disk_usage
+  check_host_memory_usage
+
   if [ ${#WARNING_OR_ERROR_CONTAINERS[@]} -gt 0 ]; then
-    print_message "------------------------ Summary of Issues Found ------------------------" "SUMMARY"
+    print_message "------------------- Summary of Container Issues Found --------------------" "SUMMARY"
     print_message "The following containers have warnings or errors: ⚠️" "SUMMARY"
     for container_name_summary in "${WARNING_OR_ERROR_CONTAINERS[@]}"; do
-      print_message "- ${container_name_summary} ❌" "WARNING"
+      if [[ " ${printed_containers[*]} " =~ " ${container_name_summary} " ]]; then continue; fi
+      printed_containers+=("$container_name_summary")
+      issues="${CONTAINER_ISSUES_MAP["$container_name_summary"]:-Unknown Issue}"
+      print_message "- ${container_name_summary} ❌ (${COLOR_BLUE}Issues:${COLOR_RESET} ${issues})" "WARNING"
     done
   else
-    print_message "------------------------ Summary of Issues Found ------------------------" "SUMMARY"
-    print_message "No issues found in monitored containers. All checks passed. ✅" "GOOD"
+    print_message "------------------- Summary of Container Issues Found --------------------" "SUMMARY"
+    print_message "No issues found in monitored containers. All container checks passed. ✅" "GOOD"
   fi
   print_message "------------------------------------------------------------------------" "SUMMARY"
 }
 
 # --- Main Execution ---
-declare -a CONTAINERS_TO_CHECK=()
-declare -a WARNING_OR_ERROR_CONTAINERS=()
-
-# Variables used in main execution block (not local)
+# (Variable declarations from previous full script - ensure these are NOT local)
 container_name_or_id="" # Loop variable
 container_actual_name=""
 inspect_json=""
@@ -581,151 +541,128 @@ stats_json=""
 cpu_percent=""
 mem_percent=""
 current_image_ref_for_update=""
-status_check_result=0
-restart_check_result=0
-resource_check_result=0
-disk_check_result=0
-network_check_result=0
-update_check_result=0
-log_check_result=0
-run_monitoring=false
-log_dir_final=""
-# For argument parsing loop (logs command)
-all_running_containers=()
-container_id_logs=""
-c_name=""
-# For ENV var parsing loop
-temp_env_names=()
-name_from_env=""
-name_trimmed=""
-# For config.sh default list
+status_check_result=0; restart_check_result=0; resource_check_result=0; disk_check_result=0;
+network_check_result=0; update_check_result=0; log_check_result=0;
+run_monitoring=false; log_dir_final=""
+all_running_containers=(); container_id_logs=""; c_name=""
+temp_env_names=(); name_from_env=""; name_trimmed=""
 all_running_names=()
+issue_tags=() # This should be inside the loop to reset for each container
+issues_string="" # This should be inside the loop to reset for each container
 
+declare -a CONTAINERS_TO_CHECK=()
+declare -a WARNING_OR_ERROR_CONTAINERS=()
+declare -A CONTAINER_ISSUES_MAP
 
+# (Argument parsing logic remains the same as previous full script)
 if [ "$#" -gt 0 ]; then
   case "$1" in
     logs)
       if [ "$#" -eq 1 ]; then
         mapfile -t all_running_containers < <(docker container ls -q 2>/dev/null)
-        if [ ${#all_running_containers[@]} -eq 0 ]; then
-          print_message "No running containers found to show logs for." "INFO"
-        else
+        if [ ${#all_running_containers[@]} -eq 0 ]; then print_message "No running containers found to show logs for." "INFO"; else
           for container_id_logs in "${all_running_containers[@]}"; do
             c_name=$(docker container inspect -f '{{.Name}}' "$container_id_logs" | sed 's|^/||' 2>/dev/null || echo "$container_id_logs")
-            check_logs "$c_name" "true" "false"
-            echo "----------------------"
-          done
-        fi
+            check_logs "$c_name" "true" "false"; echo "----------------------";
+          done; fi
       elif [ "$#" -eq 2 ]; then check_logs "$2" "true" "false";
       elif [ "$#" -eq 3 ] && [ "$2" = "errors" ]; then check_logs "$3" "true" "true";
-      else print_message "Usage: $0 logs [errors] [<container_name>]" "DANGER"; exit 1;
-      fi
+      else print_message "Usage: $0 logs [errors] [<container_name>]" "DANGER"; exit 1; fi
       exit 0 ;;
     save)
       if [ "$#" -eq 3 ] && [ "$2" = "logs" ]; then save_logs "$3";
-      else print_message "Usage: $0 save logs <container_name>" "DANGER"; exit 1;
-      fi
+      else print_message "Usage: $0 save logs <container_name>" "DANGER"; exit 1; fi
       exit 0 ;;
     *) CONTAINERS_TO_CHECK=("$@") ;;
   esac
 elif [ "$#" -eq 0 ]; then
-    if [ -n "$CONTAINER_NAMES" ]; then # Checks ENV var (string)
+    if [ -n "$CONTAINER_NAMES" ]; then
         IFS=',' read -r -a temp_env_names <<< "$CONTAINER_NAMES"
         for name_from_env in "${temp_env_names[@]}"; do
-            name_trimmed="${name_from_env#"${name_from_env%%[![:space:]]*}"}"
-            name_trimmed="${name_trimmed%"${name_trimmed##*[![:space:]]}"}"
+            name_trimmed="${name_from_env#"${name_from_env%%[![:space:]]*}"}"; name_trimmed="${name_trimmed%"${name_trimmed##*[![:space:]]}"}"
             if [ -n "$name_trimmed" ]; then CONTAINERS_TO_CHECK+=("$name_trimmed"); fi
         done
         if [ ${#CONTAINERS_TO_CHECK[@]} -eq 0 ] && [ -n "$CONTAINER_NAMES" ]; then
-            print_message "Warning: ENV CONTAINER_NAMES ('$CONTAINER_NAMES') parsed to empty list." "WARNING"
-        fi
-    elif [ ${#CONTAINER_NAMES_FROM_CONFIG_FILE[@]} -gt 0 ]; then
-        CONTAINERS_TO_CHECK=("${CONTAINER_NAMES_FROM_CONFIG_FILE[@]}")
-    else
-        mapfile -t all_running_names < <(docker container ls --format '{{.Names}}' 2>/dev/null)
+            print_message "Warning: ENV CONTAINER_NAMES ('$CONTAINER_NAMES') parsed to empty list." "WARNING"; fi
+    elif [ ${#CONTAINER_NAMES_FROM_CONFIG_FILE[@]} -gt 0 ]; then CONTAINERS_TO_CHECK=("${CONTAINER_NAMES_FROM_CONFIG_FILE[@]}");
+    else mapfile -t all_running_names < <(docker container ls --format '{{.Names}}' 2>/dev/null)
         if [ ${#all_running_names[@]} -gt 0 ]; then CONTAINERS_TO_CHECK=("${all_running_names[@]}"); fi
     fi
 fi
 
 run_monitoring=false
-if [[ "$#" -gt 0 && "$1" != "logs" && "$1" != "save" ]]; then # CLI args are container names
-    if [ ${#CONTAINERS_TO_CHECK[@]} -gt 0 ]; then run_monitoring=true;
-    else print_message "No valid container names from CLI args." "INFO"; fi
-elif [[ "$#" -eq 0 ]]; then # No CLI args
-    if [ ${#CONTAINERS_TO_CHECK[@]} -gt 0 ]; then run_monitoring=true;
-    else print_message "No containers specified or found running to monitor." "INFO"; fi
+if [[ "$#" -gt 0 && "$1" != "logs" && "$1" != "save" ]]; then
+    if [ ${#CONTAINERS_TO_CHECK[@]} -gt 0 ]; then run_monitoring=true; else print_message "No valid container names from CLI args." "INFO"; fi
+elif [[ "$#" -eq 0 ]]; then
+    if [ ${#CONTAINERS_TO_CHECK[@]} -gt 0 ]; then run_monitoring=true; else print_message "No containers specified or found running to monitor." "INFO"; fi
 fi
 
 if [ "$run_monitoring" = "true" ]; then
-    print_message "---------------------- Docker Container Monitoring Results ----------------------" "INFO"
+    print_message "${COLOR_BLUE}---------------------- Docker Container Monitoring Results ----------------------${COLOR_RESET}" "INFO"
     for container_name_or_id in "${CONTAINERS_TO_CHECK[@]}"; do
-        print_message "Container: ${container_name_or_id}" "INFO"
+        print_message "${COLOR_BLUE}Container:${COLOR_RESET} ${container_name_or_id}" "INFO"
         inspect_json=$(docker inspect "$container_name_or_id" 2>/dev/null)
         if [ -z "$inspect_json" ]; then
-            print_message "  Status: Container '${container_name_or_id}' not found or inspect failed." "DANGER"
-            WARNING_OR_ERROR_CONTAINERS+=("$container_name_or_id")
+            print_message "  ${COLOR_BLUE}Status:${COLOR_RESET} Container '${container_name_or_id}' not found or inspect failed." "DANGER"
+            WARNING_OR_ERROR_CONTAINERS+=("$container_name_or_id") # Add to general error list
+            CONTAINER_ISSUES_MAP["$container_name_or_id"]="Not Found" # Specific issue for summary
             echo "-------------------------------------------------------------------------"
             continue
         fi
-        
         container_actual_name=$(jq -r '.[0].Name' <<< "$inspect_json" | sed 's|^/||')
-
         stats_json=$(docker stats --no-stream --format '{{json .}}' "$container_name_or_id" 2>/dev/null)
-        cpu_percent="N/A"; mem_percent="N/A" # Reset for each container
+        cpu_percent="N/A"; mem_percent="N/A"
         if [ -n "$stats_json" ]; then
             cpu_percent=$(jq -r '.CPUPerc // "N/A"' <<< "$stats_json" | tr -d '%')
             mem_percent=$(jq -r '.MemPerc // "N/A"' <<< "$stats_json" | tr -d '%')
         else
-            print_message "  Stats: Could not retrieve stats for '$container_actual_name'." "WARNING"
+            print_message "  ${COLOR_BLUE}Stats:${COLOR_RESET} Could not retrieve stats for '$container_actual_name'." "WARNING"
         fi
 
-        check_container_status "$container_actual_name" "$inspect_json" "$cpu_percent" "$mem_percent"
-        status_check_result=$?
-        check_container_restarts "$container_actual_name" "$inspect_json"
-        restart_check_result=$?
-        check_resource_usage "$container_actual_name" "$cpu_percent" "$mem_percent"
-        resource_check_result=$?
-        check_disk_space "$container_actual_name" "$inspect_json"
-        disk_check_result=$?
-        check_network "$container_actual_name"
-        network_check_result=$?
+        check_container_status "$container_actual_name" "$inspect_json" "$cpu_percent" "$mem_percent"; status_check_result=$?
+        check_container_restarts "$container_actual_name" "$inspect_json"; restart_check_result=$?
+        check_resource_usage "$container_actual_name" "$cpu_percent" "$mem_percent"; resource_check_result=$?
+        check_disk_space "$container_actual_name" "$inspect_json"; disk_check_result=$?
+        check_network "$container_actual_name"; network_check_result=$?
         current_image_ref_for_update=$(jq -r '.[0].Config.Image' <<< "$inspect_json")
-        check_for_updates "$container_actual_name" "$current_image_ref_for_update" # Corrected call
-        update_check_result=$?
-        check_logs "$container_actual_name" "false" "false"
-        log_check_result=$?
+        check_for_updates "$container_actual_name" "$current_image_ref_for_update"; update_check_result=$?
+        check_logs "$container_actual_name" "false" "false"; log_check_result=$?
 
-        if [ $status_check_result -ne 0 ] || [ $restart_check_result -ne 0 ] || \
-           [ $resource_check_result -ne 0 ] || [ $disk_check_result -ne 0 ] || \
-           [ $network_check_result -ne 0 ] || [ $update_check_result -ne 0 ] || \
-           [ $log_check_result -ne 0 ]; then
+        issue_tags=() # Reset for current container
+        if [ $status_check_result -ne 0 ]; then issue_tags+=("Status"); fi
+        if [ $restart_check_result -ne 0 ]; then issue_tags+=("Restarts"); fi
+        if [ $resource_check_result -ne 0 ]; then issue_tags+=("Resources"); fi
+        if [ $disk_check_result -ne 0 ]; then issue_tags+=("Disk"); fi
+        if [ $network_check_result -ne 0 ]; then issue_tags+=("Network"); fi
+        if [ $update_check_result -ne 0 ]; then issue_tags+=("Update"); fi
+        if [ $log_check_result -ne 0 ]; then issue_tags+=("Logs"); fi
+
+        if [ ${#issue_tags[@]} -gt 0 ]; then
             WARNING_OR_ERROR_CONTAINERS+=("$container_actual_name")
+            issues_string="" # Reset for current container
+            for ((j=0; j<${#issue_tags[@]}; j++)); do
+                issues_string+="${issue_tags[$j]}"
+                if [ $j -lt $((${#issue_tags[@]} - 1)) ]; then issues_string+=", "; fi
+            done
+            CONTAINER_ISSUES_MAP["$container_actual_name"]="$issues_string"
         fi
         echo "-------------------------------------------------------------------------"
     done
-    print_message "---------------------- End of Container Monitoring Results -------------------" "INFO"
-    print_summary
+    # Call print_summary AFTER the loop
+    # print_message "---------------------- End of Container Monitoring Results -------------------" "INFO" # This is now part of summary
+    print_summary # This will now include host stats and then container summary
 fi
 
 # --- Finalize ---
+# (Log file creation/check logic remains the same as previous full script)
 if [ -n "$LOG_FILE" ]; then
   log_dir_final=$(dirname "$LOG_FILE")
-  if [ ! -d "$log_dir_final" ]; then
-    mkdir -p "$log_dir_final"
-    if [ $? -ne 0 ]; then
-      echo -e "${COLOR_RED}[ERROR]${COLOR_RESET} Could not create log directory '$log_dir_final'. Logging to file will be disabled."
-      LOG_FILE=""
-    fi
-  fi
+  if [ ! -d "$log_dir_final" ]; then mkdir -p "$log_dir_final"; if [ $? -ne 0 ]; then
+      echo -e "${COLOR_RED}[ERROR]${COLOR_RESET} Could not create log directory '$log_dir_final'. Logging disabled." >&2; LOG_FILE=""; fi; fi
   if [ -n "$LOG_FILE" ]; then
-    if ! touch "$LOG_FILE" &>/dev/null; then
-        echo -e "${COLOR_RED}[ERROR]${COLOR_RESET} Log file '$LOG_FILE' not writable/creatable. Logging disabled." >&2
-        LOG_FILE=""
-    elif [ ! -f "$LOG_FILE" ]; then # Should have been created by touch
-        echo -e "${COLOR_CYAN}[INFO]${COLOR_RESET} Log file '$LOG_FILE' created."
-    fi
-  fi
+    if ! touch "$LOG_FILE" &>/dev/null; then echo -e "${COLOR_RED}[ERROR]${COLOR_RESET} Log file '$LOG_FILE' not writable/creatable. Logging disabled." >&2; LOG_FILE="";
+    elif [ ! -f "$LOG_FILE" ]; then echo -e "${COLOR_CYAN}[INFO]${COLOR_RESET} Log file '$LOG_FILE' created."; fi; fi
 fi
 
-print_message "Docker monitoring script completed." "INFO"
+print_message "${COLOR_GREEN}Docker monitoring script completed successfully.${COLOR_RESET}" "INFO"
 exit 0
