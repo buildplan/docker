@@ -639,8 +639,7 @@ if [ "$run_monitoring" = "true" ]; then
 
         if [ ${#issue_tags[@]} -gt 0 ]; then
             # Add container name to WARNING_OR_ERROR_CONTAINERS if not already present
-            # This ensures it's listed only once in the iteration for the summary.
-            local found_in_warning_list=0
+            found_in_warning_list=0 # Removed 'local'
             for warned_container in "${WARNING_OR_ERROR_CONTAINERS[@]}"; do
                 if [[ "$warned_container" == "$container_actual_name" ]]; then
                     found_in_warning_list=1
@@ -651,26 +650,26 @@ if [ "$run_monitoring" = "true" ]; then
                 WARNING_OR_ERROR_CONTAINERS+=("$container_actual_name")
             fi
             
-            # Get existing issues for this container from the map
-            declare -a all_tags_for_this_container=()
-            local existing_issues_string="${CONTAINER_ISSUES_MAP["$container_actual_name"]}"
+            # Accumulate unique issue tags for this container
+            declare -a all_tags_for_this_container=() # Re-declared as empty for each container iteration
+            existing_issues_string="${CONTAINER_ISSUES_MAP["$container_actual_name"]}" # Removed 'local'
 
             if [ -n "$existing_issues_string" ]; then
                 # Split existing issues by ", " into an array
                 IFS=', ' read -r -a existing_tags_array <<< "$existing_issues_string"
-                for tag in "${existing_tags_array[@]}"; do
-                    # Add pre-existing tags only if they are not empty (robustness for split)
-                    if [ -n "$tag" ]; then
-                         all_tags_for_this_container+=("$tag")
+                for tag_from_map in "${existing_tags_array[@]}"; do # Renamed 'tag' to avoid conflict
+                    # Add pre-existing tags only if they are not empty
+                    if [ -n "$tag_from_map" ]; then
+                         all_tags_for_this_container+=("$tag_from_map")
                     fi
                 done
             fi
             
-            # Add new unique issues from the current pass
+            # Add new unique issues from the current pass's 'issue_tags'
             for new_tag in "${issue_tags[@]}"; do
-                local tag_already_exists=0
-                for existing_tag in "${all_tags_for_this_container[@]}"; do
-                    if [[ "$existing_tag" == "$new_tag" ]]; then
+                tag_already_exists=0 # Removed 'local'
+                for existing_tag_in_all in "${all_tags_for_this_container[@]}"; do # Renamed 'existing_tag'
+                    if [[ "$existing_tag_in_all" == "$new_tag" ]]; then
                         tag_already_exists=1
                         break
                     fi
@@ -680,22 +679,23 @@ if [ "$run_monitoring" = "true" ]; then
                 fi
             done
             
-            # Join unique tags into a string (order might change based on how they were added/found)
-            # For a consistent order, you could sort them before joining:
-            # mapfile -t sorted_unique_tags < <(printf "%s\n" "${all_tags_for_this_container[@]}" | sort -u)
-            # For now, let's just join what we have, which should be unique.
-            local final_issues_string=""
+            # Join unique tags into a string. Using sort -u for robustness in uniqueness and consistent order.
+            final_issues_string="" # Removed 'local'
             if [ ${#all_tags_for_this_container[@]} -gt 0 ]; then
-                final_issues_string="${all_tags_for_this_container[0]}" # First element
-                for ((j=1; j<${#all_tags_for_this_container[@]}; j++)); do # Loop from the second
-                    final_issues_string+=", ${all_tags_for_this_container[$j]}"
-                done
+                declare -a unique_sorted_tags=() # Temporary array for sorted unique tags
+                mapfile -t unique_sorted_tags < <(printf "%s\n" "${all_tags_for_this_container[@]}" | sort -u)
+
+                if [ ${#unique_sorted_tags[@]} -gt 0 ]; then
+                    final_issues_string="${unique_sorted_tags[0]}" # First element
+                    for ((j=1; j<${#unique_sorted_tags[@]}; j++)); do # Loop from the second
+                        final_issues_string+=", ${unique_sorted_tags[$j]}"
+                    done
+                fi
             fi
             CONTAINER_ISSUES_MAP["$container_actual_name"]="$final_issues_string"
         fi
         echo "-------------------------------------------------------------------------"
     done
-    # Call print_summary AFTER the loop
     # print_message "---------------------- End of Container Monitoring Results -------------------" "INFO" # This is now part of summary
     print_summary # This will now include host stats and then container summary
 fi
