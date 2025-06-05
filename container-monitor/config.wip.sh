@@ -3,6 +3,7 @@
 # --- Configuration File for Docker Container Monitor Script ---
 # This file should define default values.
 # The main script will handle environment variable overrides and validation.
+# --- docker ps -a --format '{{.Names}}' for container names --- 
 
 LOG_LINES_TO_CHECK_DEFAULT=20
 CHECK_FREQUENCY_MINUTES_DEFAULT=360
