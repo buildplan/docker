@@ -555,19 +555,47 @@ save_logs() {
 }
 
 check_host_disk_usage() {
-    local target_filesystem="/" # Example, make this configurable
+    # Filesystem to check. Can be overridden by HOST_DISK_CHECK_FILESYSTEM environment variable.
+    local target_filesystem="${HOST_DISK_CHECK_FILESYSTEM:-/}" 
+    # You could extend this to check multiple filesystems if HOST_DISK_CHECK_FILESYSTEM was a space-separated list
+    # e.g. for fs_path in $HOST_DISK_CHECK_FILESYSTEM; do ... done
+
     print_message "Host Disk Usage ($target_filesystem):" "INFO"
     local usage_line
-    usage_line=$(df -P "$target_filesystem" 2>/dev/null | awk 'NR==2')
+    # Use df -Ph for human-readable sizes. -P ensures POSIX format for field consistency.
+    usage_line=$(df -Ph "$target_filesystem" 2>/dev/null | awk 'NR==2') # Get the second line of output
+    
     if [ -n "$usage_line" ]; then
-        local capacity used avail
-        capacity=$(echo "$usage_line" | awk '{print $5}' | tr -d '%') # Use%
-        used=$(echo "$usage_line" | awk '{print $3}') # Used blocks/size
-        avail=$(echo "$usage_line" | awk '{print $4}') # Available blocks/size
-        # Convert used/avail to human readable if desired using numfmt or similar
-        print_message "  - $target_filesystem: $capacity% used (Used: $used, Available: $avail)" "INFO" # Or use thresholds for WARNING
+        local size_hr used_hr avail_hr capacity
+        # For df -Ph, typical output is:
+        # Filesystem Size Used Avail Use% Mounted on
+        # /dev/sda1  50G  20G   30G  40% /
+        # Fields:    $1   $2   $3   $4   $5  $6
+        
+        # Extract human-readable Size, Used, Available and the Use%
+        size_hr=$(echo "$usage_line" | awk '{print $2}')
+        used_hr=$(echo "$usage_line" | awk '{print $3}')
+        avail_hr=$(echo "$usage_line" | awk '{print $4}')
+        capacity=$(echo "$usage_line" | awk '{print $5}' | tr -d '%') # Remove % from Use%
+
+        # Check if capacity is a valid number before using it
+        if [[ "$capacity" =~ ^[0-9]+$ ]]; then
+             print_message "  - $target_filesystem: $capacity% used (Size: $size_hr, Used: $used_hr, Available: $avail_hr)" "INFO"
+             
+             #  checks for host disk usage if desired
+             # thresholds (could be made configurable like other thresholds)
+             local host_disk_warn_threshold=80
+             local host_disk_crit_threshold=90
+             if [ "$capacity" -ge "$host_disk_crit_threshold" ]; then
+                 print_message "  - $target_filesystem: CRITICAL usage $capacity% (Threshold: $host_disk_crit_threshold%)" "DANGER"
+             elif [ "$capacity" -ge "$host_disk_warn_threshold" ]; then
+                 print_message "  - $target_filesystem: HIGH usage $capacity% (Threshold: $host_disk_warn_threshold%)" "WARNING"
+             fi
+        else
+            print_message "  - Could not parse disk usage percentage for '$target_filesystem' (Raw data line: '$usage_line')" "WARNING"
+        fi
     else
-        print_message "  - Could not determine disk usage for $target_filesystem" "WARNING"
+        print_message "  - Could not determine disk usage for '$target_filesystem'" "WARNING"
     fi
 }
 
