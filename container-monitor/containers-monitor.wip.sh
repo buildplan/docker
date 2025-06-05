@@ -654,7 +654,6 @@ if [ "$run_monitoring" = "true" ]; then
 fi
 
 # --- Finalize ---
-# (Log file creation/check logic remains the same as previous full script)
 if [ -n "$LOG_FILE" ]; then
   log_dir_final=$(dirname "$LOG_FILE")
   if [ ! -d "$log_dir_final" ]; then mkdir -p "$log_dir_final"; if [ $? -ne 0 ]; then
