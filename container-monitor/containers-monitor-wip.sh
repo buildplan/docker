@@ -586,7 +586,7 @@ if [ "$run_monitoring" = "true" ]; then
     print_message "---------------------- Docker Container Monitoring Results ----------------------" "INFO"
     for container_name_or_id in "${CONTAINERS_TO_CHECK[@]}"; do
         print_message "Container: ${container_name_or_id}" "INFO"
-        local container_actual_name="${container_name_or_id}" # For consistent naming in messages if ID was given
+        container_actual_name="${container_name_or_id}" # For consistent naming in messages if ID was given
 
         inspect_json=$(docker inspect "$container_name_or_id" 2>/dev/null)
         if [ -z "$inspect_json" ]; then
@@ -636,7 +636,6 @@ if [ "$run_monitoring" = "true" ]; then
 fi
 
 # --- Finalize ---
-# ... (Finalize logic remains the same) ...
 if [ -n "$LOG_FILE" ]; then
   log_dir_final=$(dirname "$LOG_FILE")
   if [ ! -d "$log_dir_final" ]; then
