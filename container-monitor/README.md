@@ -27,7 +27,7 @@ curl -o config.sh https://raw.githubusercontent.com/buildplan/docker/refs/heads/
 ```
 ##### test version 
 ```bash
-curl -o containers-monitor.wip.sh https://raw.githubusercontent.com/buildplan/docker/refs/heads/main/container-monitor/containers-monitor.wip.sh
+curl -o containers-monitor.wip.sh https://raw.githubusercontent.com/buildplan/docker/refs/heads/main/container-monitor/containers-monitor.wip.sh && chmod +x containers-monitor.wip.sh
 ```
 
 **Note**: Always verify the integrity of downloaded scripts, especially when downloading from the internet.
