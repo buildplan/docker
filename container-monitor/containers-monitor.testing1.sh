@@ -50,7 +50,8 @@ COLOR_MAGENTA="\033[0;35m"      # Used for [SUMMARY]
 COLOR_BLUE="\033[0;34m"          # Standard Blue for labels/keys
 
 # --- Global Flags ---
-SUMMARY_ONLY_MODE=false # Global flag for summary-only output
+SUMMARY_ONLY_MODE=false 
+PRINT_MESSAGE_FORCE_STDOUT=false # Normally false, print_summary will toggle it
 
 # --- Script Default Configuration Values ---
 _SCRIPT_DEFAULT_LOG_LINES_TO_CHECK=20
@@ -77,7 +78,7 @@ declare -a CONTAINER_NAMES_FROM_CONFIG_FILE=()
 # --- Source Configuration File (config.sh) ---
 _CONFIG_FILE_PATH="$(cd "$(dirname "$0")" && pwd)/config.sh"
 if [ -f "$_CONFIG_FILE_PATH" ]; then
-  source "$_CONFIG_FILE_PATH" # Expects VARNAME_DEFAULT variables
+  source "$_CONFIG_FILE_PATH" 
 
   LOG_LINES_TO_CHECK="${LOG_LINES_TO_CHECK_DEFAULT:-$LOG_LINES_TO_CHECK}"
   CHECK_FREQUENCY_MINUTES="${CHECK_FREQUENCY_MINUTES_DEFAULT:-$CHECK_FREQUENCY_MINUTES}"
@@ -106,7 +107,6 @@ MEMORY_WARNING_THRESHOLD="${MEMORY_WARNING_THRESHOLD:-$MEMORY_WARNING_THRESHOLD}
 DISK_SPACE_THRESHOLD="${DISK_SPACE_THRESHOLD:-$DISK_SPACE_THRESHOLD}"
 NETWORK_ERROR_THRESHOLD="${NETWORK_ERROR_THRESHOLD:-$NETWORK_ERROR_THRESHOLD}"
 HOST_DISK_CHECK_FILESYSTEM="${HOST_DISK_CHECK_FILESYSTEM:-$HOST_DISK_CHECK_FILESYSTEM}"
-# CONTAINER_NAMES (env var, comma-separated string) is processed later in main execution.
 
 # --- Prerequisite Checks ---
 if ! command -v docker >/dev/null 2>&1; then echo -e "${COLOR_RED}[FATAL]${COLOR_RESET} Docker command not found." >&2; exit 1; fi
@@ -139,22 +139,14 @@ print_message() {
 
   log_output_no_color=$(echo "$message" | sed -r "s/\x1B\[[0-9;]*[mK]//g")
 
-  # --- Output to STDOUT ---
+  local do_stdout_print=true
   if [ "$SUMMARY_ONLY_MODE" = "true" ]; then
-    case "$color_type" in
-        "SUMMARY"|"WARNING"|"DANGER"|"GOOD") # Types to show in summary-only mode
-            if [[ "$color_type" == "NONE" ]]; then 
-                echo -e "${message}"
-            else
-                local colored_message_for_echo="${color_code}[${color_type}]${COLOR_RESET} ${message}"
-                echo -e "${colored_message_for_echo}"
-            fi
-            ;;
-        *) # Suppress other types (like INFO from individual checks) from stdout
-            ;;
-    esac
-  else
-    # Normal mode: print all messages to stdout
+    if [ "$PRINT_MESSAGE_FORCE_STDOUT" = "false" ]; then
+      do_stdout_print=false
+    fi
+  fi
+
+  if [ "$do_stdout_print" = "true" ]; then
     if [[ "$color_type" == "NONE" ]]; then
        echo -e "${message}"
     else
@@ -163,12 +155,16 @@ print_message() {
     fi
   fi
 
-  # --- Logging to file (always happens if LOG_FILE is set) ---
   if [ -n "$LOG_FILE" ]; then
     local log_prefix_for_file="[${color_type}]"
     if [[ "$color_type" == "NONE" ]]; then log_prefix_for_file=""; fi
     local log_dir; log_dir=$(dirname "$LOG_FILE")
-    if [ ! -d "$log_dir" ]; then mkdir -p "$log_dir" &>/dev/null; fi
+    if [ ! -d "$log_dir" ]; then 
+        if ! mkdir -p "$log_dir" &>/dev/null; then
+            echo -e "${COLOR_RED}[ERROR]${COLOR_RESET} Cannot create log directory '$log_dir'. Logging disabled for this message." >&2
+            return 
+        fi
+    fi
     if touch "$LOG_FILE" &>/dev/null; then
         echo "$(date '+%Y-%m-%d %H:%M:%S') ${log_prefix_for_file} ${log_output_no_color}" >> "$LOG_FILE"
     else
@@ -177,13 +173,7 @@ print_message() {
   fi
 }
 
-# (check_container_status, check_container_restarts, check_resource_usage, 
-#  check_disk_space, check_network, check_for_updates, check_logs, save_logs remain the same
-#  as the last full script version where label coloring was added.
-#  Ensure they use print_message appropriately for their INFO/GOOD/WARNING/DANGER messages.)
-#  For brevity, I will not repeat them here but assume they are the versions from your latest full script.
-
-check_container_status() {
+check_container_status() { # Uses print_message
   local container_name="$1"; local inspect_data="$2"; local cpu_for_status_msg="$3"; local mem_for_status_msg="$4"
   local status health_status detailed_health
   status=$(jq -r '.[0].State.Status' <<< "$inspect_data"); health_status="not configured"
@@ -202,14 +192,14 @@ check_container_status() {
       print_message "  ${COLOR_BLUE}Status:${COLOR_RESET} Running (Status: $status, Health: $health_status, CPU: $cpu_for_status_msg, Mem: $mem_for_status_msg)" "WARNING"; return 1;
     fi; fi
 }
-check_container_restarts() {
+check_container_restarts() { # Uses print_message
   local container_name="$1"; local inspect_data="$2"; local restart_count is_restarting
   restart_count=$(jq -r '.[0].RestartCount' <<< "$inspect_data"); is_restarting=$(jq -r '.[0].State.Restarting' <<< "$inspect_data")
   if [ "$is_restarting" = "true" ]; then print_message "  ${COLOR_BLUE}Restart Status:${COLOR_RESET} Container '$container_name' is currently restarting." "WARNING"; return 1;
   elif [ "$restart_count" -gt 0 ]; then print_message "  ${COLOR_BLUE}Restart Status:${COLOR_RESET} Container '$container_name' has restarted $restart_count times." "WARNING"; return 1; else
     print_message "  ${COLOR_BLUE}Restart Status:${COLOR_RESET} No unexpected restarts detected for '$container_name'." "GOOD"; return 0; fi
 }
-check_resource_usage() {
+check_resource_usage() { # Uses print_message
   local container_name="$1"; local cpu_percent="$2"; local mem_percent="$3"; local issues_found=0
   if [[ "$cpu_percent" =~ ^[0-9.]+$ ]]; then
     if awk -v cpu="$cpu_percent" -v threshold="$CPU_WARNING_THRESHOLD" 'BEGIN {exit !(cpu > threshold)}'; then
@@ -223,7 +213,7 @@ check_resource_usage() {
     print_message "  ${COLOR_BLUE}Memory Usage:${COLOR_RESET} Could not determine memory usage (value: ${mem_percent})" "WARNING"; issues_found=1; fi
   return $issues_found
 }
-check_disk_space() {
+check_disk_space() { # Uses print_message
   local container_name="$1"; local inspect_data="$2"; local issues_found=0; local i mp_destination mp_type disk_usage 
   local num_mounts; local mount_processed_for_df_check=false
   num_mounts=$(jq -r '.[0].Mounts | length // 0' <<< "$inspect_data" 2>/dev/null)
@@ -250,7 +240,7 @@ check_disk_space() {
       print_message "  ${COLOR_BLUE}Disk Space:${COLOR_RESET} No mounts deemed suitable for percentage-based usage check in '$container_name' (out of $num_mounts total mounts)." "INFO"; fi
   return $issues_found
 }
-check_network() {
+check_network() { # Uses print_message
   local container_name="$1"; local issues_found=0; local network_stats line interface errors packets error_rate data_part
   local _r_bytes _r_packets _r_errs _r_drop _r_fifo _r_frame _r_compressed _r_multicast; local _t_bytes _t_packets _t_errs _t_drop _t_fifo _t_colls _t_carrier _t_compressed
   local network_issue_reported_for_container=false
@@ -273,7 +263,7 @@ check_network() {
   if [ $issues_found -eq 0 ] && ! $network_issue_reported_for_container ; then print_message "  ${COLOR_BLUE}Network:${COLOR_RESET} No significant network issues detected for '$container_name'." "INFO"; fi
   return $issues_found
 }
-check_for_updates() {
+check_for_updates() { # Uses print_message
     local container_name="$1"; local current_image_ref="$2"; local registry_host image_path_for_skopeo tag image_name_no_tag first_part skopeo_image_ref
     local search_pattern_in_repodigests local_digest_line local_digest skopeo_output skopeo_exit_code remote_digest; tag="latest"
     if [[ "$current_image_ref" == *@sha256:* ]]; then print_message "  ${COLOR_BLUE}Update Check:${COLOR_RESET} Container '$container_name' is running image pinned by digest ($current_image_ref). Skipping." "INFO"; return 0; fi
@@ -309,7 +299,7 @@ check_for_updates() {
     if [ "$remote_digest" != "$local_digest" ]; then print_message "  ${COLOR_BLUE}Update Check:${COLOR_RESET} Update available for '$current_image_ref'!\n  ${COLOR_BLUE}Local Digest:${COLOR_RESET} $local_digest\n  ${COLOR_BLUE}Remote Digest:${COLOR_RESET} $remote_digest" "WARNING"; return 1; else
         print_message "  ${COLOR_BLUE}Update Check:${COLOR_RESET} Image '$current_image_ref' is up-to-date." "GOOD"; return 0; fi
 }
-check_logs() {
+check_logs() { # Uses print_message
   local container_name="$1"; local print_to_stdout="${2:-false}"; local filter_errors="${3:-false}"; local raw_logs docker_logs_status logs_to_display_or_analyze issues_found_by_grep
   raw_logs=$(docker logs --tail "$LOG_LINES_TO_CHECK" "$container_name" 2>&1); docker_logs_status=$?
   if [ $docker_logs_status -ne 0 ]; then print_message "  ${COLOR_BLUE}Log Check:${COLOR_RESET} Error retrieving logs for '$container_name' (status: $docker_logs_status)." "DANGER"; print_message "    Docker error: $raw_logs" "INFO"; return 1; fi
@@ -328,15 +318,15 @@ check_logs() {
           print_message "  ${COLOR_BLUE}Log Check:${COLOR_RESET} Logs retrieved (last $LOG_LINES_TO_CHECK lines). No obvious widespread errors found." "GOOD"; return 0; fi; else
       print_message "  ${COLOR_BLUE}Log Check:${COLOR_RESET} No log output in last $LOG_LINES_TO_CHECK lines for '$container_name'." "INFO"; return 1; fi; fi
 }
-save_logs() {
+save_logs() { # Uses print_message
   local container_name="$1"; local log_file_name="${container_name}_logs_$(date '+%Y-%m-%d_%H-%M-%S').log"
   if docker logs "$container_name" > "$log_file_name"; then print_message "Logs for '$container_name' saved to '$log_file_name'." "GOOD"; else print_message "Error saving logs for '$container_name'." "DANGER"; fi
 }
 
-check_host_disk_usage() {
+check_host_disk_usage() { # Echos output, does not call print_message directly
     local target_filesystem="${HOST_DISK_CHECK_FILESYSTEM:-/}" 
     local usage_line size_hr used_hr avail_hr capacity
-    local output_string # Will hold the final string to echo
+    local output_string 
 
     usage_line=$(df -Ph "$target_filesystem" 2>/dev/null | awk 'NR==2')
     if [ -n "$usage_line" ]; then
@@ -352,10 +342,10 @@ check_host_disk_usage() {
     else
         output_string="  ${COLOR_BLUE}Host Disk Usage ($target_filesystem):${COLOR_RESET} Could not determine usage."
     fi
-    echo "$output_string" # Echo the result for capture by print_summary
+    echo "$output_string"
 }
 
-check_host_memory_usage() {
+check_host_memory_usage() { # Echos output, does not call print_message directly
     local mem_line total_mem used_mem free_mem perc_used output_string
     if command -v free >/dev/null 2>&1; then
         read -r _ total_mem used_mem free_mem _ < <(free -m | awk 'NR==2')
@@ -368,17 +358,19 @@ check_host_memory_usage() {
     else
         output_string="  ${COLOR_BLUE}Host Memory Usage:${COLOR_RESET} 'free' command not found."
     fi
-    echo "$output_string" # Echo the result for capture by print_summary
+    echo "$output_string"
 }
 
-print_summary() {
+print_summary() { # Uses print_message with FORCE_STDOUT
   local container_name_summary issues issue_emoji
   local printed_containers=() 
   local host_disk_summary_output host_memory_summary_output
 
+  PRINT_MESSAGE_FORCE_STDOUT=true # Enable stdout for all messages within this function
+
   print_message "-------------------------- Host System Stats ---------------------------" "SUMMARY"
-  host_disk_summary_output=$(check_host_disk_usage)
-  host_memory_summary_output=$(check_host_memory_usage)
+  host_disk_summary_output=$(check_host_disk_usage)    
+  host_memory_summary_output=$(check_host_memory_usage)  
   
   print_message "$host_disk_summary_output" "SUMMARY"    
   print_message "$host_memory_summary_output" "SUMMARY" 
@@ -408,10 +400,11 @@ print_summary() {
     print_message "No issues found in monitored containers. All container checks passed. ✅" "GOOD"
   fi
   print_message "------------------------------------------------------------------------" "SUMMARY"
+
+  PRINT_MESSAGE_FORCE_STDOUT=false # Reset the flag
 }
 
 # --- Main Execution ---
-# Variables used in main execution block (not local)
 container_name_or_id=""; container_actual_name=""; inspect_json=""; stats_json=""; cpu_percent=""; mem_percent=""; current_image_ref_for_update=""
 status_check_result=0; restart_check_result=0; resource_check_result=0; disk_check_result=0; network_check_result=0; update_check_result=0; log_check_result=0;
 run_monitoring=false; log_dir_final=""; all_running_containers=(); container_id_logs=""; c_name=""
@@ -422,13 +415,15 @@ declare -a CONTAINERS_TO_CHECK=()
 declare -a WARNING_OR_ERROR_CONTAINERS=()
 declare -A CONTAINER_ISSUES_MAP
 
+# Argument parsing for 'summary' mode
 if [ "$#" -gt 0 ] && [ "$1" = "summary" ]; then
     SUMMARY_ONLY_MODE=true
-    shift 
+    shift # Remove 'summary' from arguments, rest are processed by subsequent logic
 fi
 
+# Argument parsing for 'logs', 'save', or specific container names (if not in summary mode already handled)
 if [ "$SUMMARY_ONLY_MODE" = "false" ]; then
-    if [ "$#" -gt 0 ]; then
+    if [ "$#" -gt 0 ]; then # If arguments remain (or were present initially)
       case "$1" in
         logs)
           if [ "$#" -eq 1 ]; then
@@ -446,68 +441,69 @@ if [ "$SUMMARY_ONLY_MODE" = "false" ]; then
           if [ "$#" -eq 3 ] && [ "$2" = "logs" ]; then save_logs "$3";
           else print_message "Usage: $0 save logs <container_name>" "DANGER"; exit 1; fi
           exit 0 ;;
-        *) CONTAINERS_TO_CHECK=("$@") ;;
+        *) # Not 'logs' or 'save', so arguments are container names
+          CONTAINERS_TO_CHECK=("$@") ;;
       esac
     fi
-elif [ "$#" -gt 0 ]; then # In summary mode, and other arguments were provided (container names)
+elif [ "$#" -gt 0 ]; then # In SUMMARY_ONLY_MODE, if args remain after 'summary' was shifted, they are container names
     CONTAINERS_TO_CHECK=("$@")
 fi
 
-# Populate CONTAINERS_TO_CHECK if still empty (e.g. no args, or only 'summary' was given)
+# Populate CONTAINERS_TO_CHECK if it's still empty
+# (e.g. no args given, or 'summary' was the only arg, or 'summary container1' was handled above)
 if [ ${#CONTAINERS_TO_CHECK[@]} -eq 0 ]; then
-    if [ -n "$CONTAINER_NAMES" ]; then # ENV var (string)
+    if [ -n "$CONTAINER_NAMES" ]; then # ENV var
         IFS=',' read -r -a temp_env_names <<< "$CONTAINER_NAMES"
         for name_from_env in "${temp_env_names[@]}"; do
             name_trimmed="${name_from_env#"${name_from_env%%[![:space:]]*}"}"; name_trimmed="${name_trimmed%"${name_trimmed##*[![:space:]]}"}"
             if [ -n "$name_trimmed" ]; then CONTAINERS_TO_CHECK+=("$name_trimmed"); fi
         done
         if [ ${#CONTAINERS_TO_CHECK[@]} -eq 0 ] && [ -n "$CONTAINER_NAMES" ]; then
-            print_message "Warning: ENV CONTAINER_NAMES ('$CONTAINER_NAMES') parsed to empty list." "WARNING"; fi
-    elif [ ${#CONTAINER_NAMES_FROM_CONFIG_FILE[@]} -gt 0 ]; then CONTAINERS_TO_CHECK=("${CONTAINER_NAMES_FROM_CONFIG_FILE[@]}");
-    else mapfile -t all_running_names < <(docker container ls --format '{{.Names}}' 2>/dev/null)
+            # This print_message uses WARNING, so it will show in summary_only_mode if PRINT_MESSAGE_FORCE_STDOUT is true
+            # which it won't be here. This is fine, it's a config warning, should go to log.
+            print_message "Warning: ENV CONTAINER_NAMES ('$CONTAINER_NAMES') parsed to empty list." "WARNING";
+        fi
+    elif [ ${#CONTAINER_NAMES_FROM_CONFIG_FILE[@]} -gt 0 ]; then # Config file
+        CONTAINERS_TO_CHECK=("${CONTAINER_NAMES_FROM_CONFIG_FILE[@]}")
+    else # Default to all running
+        mapfile -t all_running_names < <(docker container ls --format '{{.Names}}' 2>/dev/null)
         if [ ${#all_running_names[@]} -gt 0 ]; then CONTAINERS_TO_CHECK=("${all_running_names[@]}"); fi
     fi
 fi
 
+# Determine if monitoring should run
 run_monitoring=false
 if [ ${#CONTAINERS_TO_CHECK[@]} -gt 0 ]; then
-    # Only run monitoring if not 'logs' or 'save' (which exit earlier if SUMMARY_ONLY_MODE is false)
-    if [ "$SUMMARY_ONLY_MODE" = "true" ]; then
-        run_monitoring=true
-    else
-        # Check if $1 was logs or save, if so, we would have exited.
-        # If $1 was a container name, or $# was 0 initially, then run_monitoring should be true.
-        # This logic might need to be simpler: if we haven't exited by now, and have containers, monitor.
-        # The original: if [[ "$#" -gt 0 && "$1" != "logs" && "$1" != "save" ]] || [[ "$#" -eq 0 ]]
-        # Given 'summary' is shifted, if $1 is now a container name, it's fine. If $# is 0, it's fine.
-        run_monitoring=true # Simplified: if we have containers and haven't exited, run.
-    fi
-else # No containers to check after all logic
-    if [ "$SUMMARY_ONLY_MODE" = "false" ]; then # Only print this if not in summary mode where summary will say no issues
+    run_monitoring=true
+else 
+    # Only print this "nothing to monitor" message if not in summary mode (summary will print its own "no issues" or issue list)
+    # And if we didn't already exit due to 'logs' or 'save'
+    # The 'logs'/'save' exit earlier if SUMMARY_ONLY_MODE is false.
+    if [ "$SUMMARY_ONLY_MODE" = "false" ]; then 
         print_message "No containers specified or found running to monitor." "INFO"
     fi
 fi
 
-
 if [ "$run_monitoring" = "true" ]; then
-    if [ "$SUMMARY_ONLY_MODE" = "false" ]; then # Only print this header in normal mode
+    if [ "$SUMMARY_ONLY_MODE" = "false" ]; then 
         print_message "${COLOR_BLUE}---------------------- Docker Container Monitoring Results ----------------------${COLOR_RESET}" "INFO"
     fi
     for container_name_or_id in "${CONTAINERS_TO_CHECK[@]}"; do
-        if [ "$SUMMARY_ONLY_MODE" = "false" ]; then # Only print this per-container header in normal mode
+        if [ "$SUMMARY_ONLY_MODE" = "false" ]; then 
             print_message "${COLOR_BLUE}Container:${COLOR_RESET} ${container_name_or_id}" "INFO"
         fi
         inspect_json=$(docker inspect "$container_name_or_id" 2>/dev/null)
         if [ -z "$inspect_json" ]; then
-            # This message should appear even in summary mode if it's a problem for the summary
-            # However, print_message will suppress it if not WARNING/DANGER/SUMMARY/GOOD type.
-            # Let's make "Not Found" a specific DANGER that summary can use.
+            # This DANGER message will be shown in summary_only_mode by print_summary (via CONTAINER_ISSUES_MAP)
+            # For non-summary mode, it prints here. print_message handles suppression.
             print_message "  ${COLOR_BLUE}Status:${COLOR_RESET} Container '${container_name_or_id}' not found or inspect failed." "DANGER"
+            
             # Ensure map is populated for summary even if we continue
-            if ! [[ " ${WARNING_OR_ERROR_CONTAINERS[*]} " =~ " ${container_name_or_id} " ]]; then
-                WARNING_OR_ERROR_CONTAINERS+=("$container_name_or_id") # Use original name/ID if actual_name fails
-            fi
+            local found_in_warning_list_loop=0 # Use different var name to avoid conflict with global
+            for wc_loop in "${WARNING_OR_ERROR_CONTAINERS[@]}"; do if [[ "$wc_loop" == "$container_name_or_id" ]]; then found_in_warning_list_loop=1; break; fi; done
+            if [[ "$found_in_warning_list_loop" -eq 0 ]]; then WARNING_OR_ERROR_CONTAINERS+=("$container_name_or_id"); fi
             CONTAINER_ISSUES_MAP["$container_name_or_id"]="Not Found"
+
             if [ "$SUMMARY_ONLY_MODE" = "false" ]; then echo "-------------------------------------------------------------------------"; fi
             continue
         fi
@@ -518,7 +514,6 @@ if [ "$run_monitoring" = "true" ]; then
             cpu_percent=$(jq -r '.CPUPerc // "N/A"' <<< "$stats_json" | tr -d '%')
             mem_percent=$(jq -r '.MemPerc // "N/A"' <<< "$stats_json" | tr -d '%')
         else
-            # This is an INFO/WARNING for detailed log, summary will reflect if it causes a check to fail
             print_message "  ${COLOR_BLUE}Stats:${COLOR_RESET} Could not retrieve stats for '$container_actual_name'." "WARNING"
         fi
 
@@ -531,7 +526,7 @@ if [ "$run_monitoring" = "true" ]; then
         check_for_updates "$container_actual_name" "$current_image_ref_for_update"; update_check_result=$?
         check_logs "$container_actual_name" "false" "false"; log_check_result=$?
 
-        issue_tags=() 
+        issue_tags=() # Reset for current container
         if [ $status_check_result -ne 0 ]; then issue_tags+=("Status"); fi
         if [ $restart_check_result -ne 0 ]; then issue_tags+=("Restarts"); fi
         if [ $resource_check_result -ne 0 ]; then issue_tags+=("Resources"); fi
@@ -541,7 +536,7 @@ if [ "$run_monitoring" = "true" ]; then
         if [ $log_check_result -ne 0 ]; then issue_tags+=("Logs"); fi
 
         if [ ${#issue_tags[@]} -gt 0 ]; then
-            found_in_warning_list=0
+            found_in_warning_list=0 # This variable is fine here, it's effectively local to this block iteration
             for warned_container in "${WARNING_OR_ERROR_CONTAINERS[@]}"; do
                 if [[ "$warned_container" == "$container_actual_name" ]]; then found_in_warning_list=1; break; fi; done
             if [[ "$found_in_warning_list" -eq 0 ]]; then WARNING_OR_ERROR_CONTAINERS+=("$container_actual_name"); fi
@@ -567,11 +562,11 @@ if [ "$run_monitoring" = "true" ]; then
                     for ((j=1; j<${#unique_sorted_tags[@]}; j++)); do final_issues_string+=", ${unique_sorted_tags[$j]}"; done; fi; fi
             CONTAINER_ISSUES_MAP["$container_actual_name"]="$final_issues_string"
         fi
-        if [ "$SUMMARY_ONLY_MODE" = "false" ]; then # Only print separator in normal mode
+        if [ "$SUMMARY_ONLY_MODE" = "false" ]; then 
              echo "-------------------------------------------------------------------------"
         fi
     done
-    # print_summary is now the single point for all summary output
+    # Call print_summary which will now control its own output visibility via PRINT_MESSAGE_FORCE_STDOUT
     print_summary 
 fi
 
@@ -579,31 +574,21 @@ fi
 if [ -n "$LOG_FILE" ]; then
   log_dir_final=$(dirname "$LOG_FILE")
   if [ ! -d "$log_dir_final" ]; then mkdir -p "$log_dir_final"; if [ $? -ne 0 ]; then
+      # This echo will be visible regardless of summary mode, which is fine for a fatalish error.
       echo -e "${COLOR_RED}[ERROR]${COLOR_RESET} Could not create log directory '$log_dir_final'. Logging disabled." >&2; LOG_FILE=""; fi; fi
-  if [ -n "$LOG_FILE" ]; then # Re-check LOG_FILE as it might have been unset
+  if [ -n "$LOG_FILE" ]; then 
     if ! touch "$LOG_FILE" &>/dev/null; then echo -e "${COLOR_RED}[ERROR]${COLOR_RESET} Log file '$LOG_FILE' not writable/creatable. Logging disabled." >&2; LOG_FILE="";
-    # Only print "created" if it was newly created by touch and didn't exist before.
-    # The current `elif [ ! -f "$LOG_FILE" ]` might be misleading if touch succeeded on existing file.
-    # Simpler: If touch failed, it's an error. If it succeeded, file exists.
-    # No specific "created" message here to reduce noise, main thing is it's usable.
+    # elif [ ! -f "$LOG_FILE" ]; then # This 'created' message can be noisy, and touch handles creation.
+    #    PRINT_MESSAGE_FORCE_STDOUT=true; print_message "${COLOR_CYAN}Log file '$LOG_FILE' created.${COLOR_RESET}" "INFO"; PRINT_MESSAGE_FORCE_STDOUT=false;
     fi; fi
 fi
 
-# Final completion message
-# In summary_only_mode, this might be the only non-summary line if no errors in summary itself.
-# Use SUMMARY type so it shows up in summary_only_mode.
+PRINT_MESSAGE_FORCE_STDOUT=true # Ensure final completion message is visible in summary mode
 if [ "$SUMMARY_ONLY_MODE" = "true" ]; then
-    # If there were errors, they'd be printed by print_summary with WARNING/DANGER tags.
-    # If print_summary said "No issues", this is just a confirmation.
-    if [ ${#WARNING_OR_ERROR_CONTAINERS[@]} -eq 0 ]; then
-        # Already printed by summary: "No issues found... All container checks passed."
-        # So maybe only print this if there were issues, as a final "completed despite issues".
-        # Or just a generic completion.
-        print_message "Summary generation completed." "SUMMARY" 
-    else
-        print_message "Summary generation completed (issues found)." "SUMMARY"
-    fi
+    # print_summary already indicates if issues were found.
+    print_message "Summary generation completed." "SUMMARY" 
 else
-    print_message "${COLOR_GREEN}Docker monitoring script completed successfully.${COLOR_RESET}" "INFO" # Normal mode completion
+    print_message "${COLOR_GREEN}Docker monitoring script completed successfully.${COLOR_RESET}" "INFO"
 fi
+PRINT_MESSAGE_FORCE_STDOUT=false # Reset for safety, though script is exiting
 exit 0
