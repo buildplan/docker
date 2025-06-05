@@ -267,7 +267,7 @@ check_disk_space() {
   local num_mounts
   local mount_processed_for_df_check=false # Flag to see if any mount was actually df-checked
 
-  num_mounts=$(jq -r '.[0].Mounts | length // 0' <<< "$inspect_data" 2>/dev/null) # Added // 0 for robustness
+  num_mounts=$(jq -r '.[0].Mounts | length // 0' <<< "$inspect_data" 2>/dev/null)
 
   if ! [[ "$num_mounts" =~ ^[0-9]+$ ]] || [ "$num_mounts" -eq 0 ]; then
     print_message "  Disk Space: No mounted volumes found for '$container_name' or error parsing mounts." "INFO"
@@ -279,31 +279,28 @@ check_disk_space() {
     mp_type=$(jq -r ".[0].Mounts[$i].Type // empty" <<< "$inspect_data" 2>/dev/null)
 
     if [ -z "$mp_destination" ]; then
-        # Optional: print_message "  DEBUG: Mount $i in '$container_name' has empty destination. Skipping." "INFO"
         continue
     fi
 
-    # --- Filter out mount types not suitable for df percentage check ---
-    # Explicitly skip sockets.
-    # You could extend this to skip other types if needed, e.g. if mp_type is 'npipe' or other special types.
-    if [[ "$mp_destination" == *".sock" ]]; then
-      print_message "  Disk Space: Skipping disk usage percentage check for socket path '$mp_destination' in '$container_name'." "INFO"
-      continue
+    # --- Enhanced Filter for special/virtual paths ---
+    # Add more patterns here if needed for your specific environment
+    if [[ "$mp_destination" == *".sock" ]] || \
+       [[ "$mp_destination" == "/proc" ]] || [[ "$mp_destination" == "/proc/"* ]] || \
+       [[ "$mp_destination" == "/sys" ]]  || [[ "$mp_destination" == "/sys/"* ]] || \
+       [[ "$mp_destination" == "/dev" ]]  || [[ "$mp_destination" == "/dev/"* ]] || \
+       [[ "$mp_destination" == "/host/proc" ]] || [[ "$mp_destination" == "/host/proc/"* ]] || \
+       [[ "$mp_destination" == "/host/sys" ]]  || [[ "$mp_destination" == "/host/sys/"* ]] ; then
+      print_message "  Disk Space: Skipping disk usage percentage check for special/virtual path '$mp_destination' (Type: '$mp_type') in '$container_name'." "INFO"
+      continue # Skip to the next mount
     fi
-
-    # Add more specific filters if certain mp_type or mp_destination patterns are known to be problematic
-    # Example: if [ "$mp_type" == "npipe" ]; then continue; fi
-
+    
     mount_processed_for_df_check=true # Mark that we are attempting a df check for this mount
 
-    # Use df -P for POSIX output. Target the (NF-1) field for Capacity (e.g., "13%") and remove trailing %.
-    # awk 'NR==2{val=$(NF-1); sub(/%$/,"",val); print val}'
-    # Added timeout to prevent hangs on problematic mounts.
     disk_usage=$(timeout 5 docker exec "$container_name" df -P "$mp_destination" 2>/dev/null | awk 'NR==2 {val=$(NF-1); sub(/%$/,"",val); print val}')
     
-    if ! [[ "$disk_usage" =~ ^[0-9]+$ ]]; then # Check if disk_usage is a valid number
+    if ! [[ "$disk_usage" =~ ^[0-9]+$ ]]; then
       print_message "  Disk Space: Could not accurately check usage for '$mp_destination' in '$container_name' (Type: '$mp_type', Raw DF Value: '$disk_usage')." "WARNING"
-      issues_found=1 # Count as issue if usage cannot be determined for a mount we attempted to check
+      issues_found=1
       continue
     fi
 
@@ -316,7 +313,6 @@ check_disk_space() {
   done
 
   if ! $mount_processed_for_df_check && [ "$num_mounts" -gt 0 ]; then
-      # This means there were mounts listed in 'docker inspect', but all were filtered out before 'df' was attempted.
       print_message "  Disk Space: No mounts deemed suitable for percentage-based usage check in '$container_name' (out of $num_mounts total mounts)." "INFO"
   fi
 
