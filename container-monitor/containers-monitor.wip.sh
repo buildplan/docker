@@ -628,7 +628,7 @@ if [ "$run_monitoring" = "true" ]; then
         check_for_updates "$container_actual_name" "$current_image_ref_for_update"; update_check_result=$?
         check_logs "$container_actual_name" "false" "false"; log_check_result=$?
 
-        issue_tags=() # Reset for current container
+        issue_tags=() # Reset for current container processing pass
         if [ $status_check_result -ne 0 ]; then issue_tags+=("Status"); fi
         if [ $restart_check_result -ne 0 ]; then issue_tags+=("Restarts"); fi
         if [ $resource_check_result -ne 0 ]; then issue_tags+=("Resources"); fi
@@ -638,13 +638,60 @@ if [ "$run_monitoring" = "true" ]; then
         if [ $log_check_result -ne 0 ]; then issue_tags+=("Logs"); fi
 
         if [ ${#issue_tags[@]} -gt 0 ]; then
-            WARNING_OR_ERROR_CONTAINERS+=("$container_actual_name")
-            issues_string="" # Reset for current container
-            for ((j=0; j<${#issue_tags[@]}; j++)); do
-                issues_string+="${issue_tags[$j]}"
-                if [ $j -lt $((${#issue_tags[@]} - 1)) ]; then issues_string+=", "; fi
+            # Add container name to WARNING_OR_ERROR_CONTAINERS if not already present
+            # This ensures it's listed only once in the iteration for the summary.
+            local found_in_warning_list=0
+            for warned_container in "${WARNING_OR_ERROR_CONTAINERS[@]}"; do
+                if [[ "$warned_container" == "$container_actual_name" ]]; then
+                    found_in_warning_list=1
+                    break
+                fi
             done
-            CONTAINER_ISSUES_MAP["$container_actual_name"]="$issues_string"
+            if [[ "$found_in_warning_list" -eq 0 ]]; then
+                WARNING_OR_ERROR_CONTAINERS+=("$container_actual_name")
+            fi
+            
+            # Get existing issues for this container from the map
+            declare -a all_tags_for_this_container=()
+            local existing_issues_string="${CONTAINER_ISSUES_MAP["$container_actual_name"]}"
+
+            if [ -n "$existing_issues_string" ]; then
+                # Split existing issues by ", " into an array
+                IFS=', ' read -r -a existing_tags_array <<< "$existing_issues_string"
+                for tag in "${existing_tags_array[@]}"; do
+                    # Add pre-existing tags only if they are not empty (robustness for split)
+                    if [ -n "$tag" ]; then
+                         all_tags_for_this_container+=("$tag")
+                    fi
+                done
+            fi
+            
+            # Add new unique issues from the current pass
+            for new_tag in "${issue_tags[@]}"; do
+                local tag_already_exists=0
+                for existing_tag in "${all_tags_for_this_container[@]}"; do
+                    if [[ "$existing_tag" == "$new_tag" ]]; then
+                        tag_already_exists=1
+                        break
+                    fi
+                done
+                if [[ "$tag_already_exists" -eq 0 ]]; then
+                    all_tags_for_this_container+=("$new_tag")
+                fi
+            done
+            
+            # Join unique tags into a string (order might change based on how they were added/found)
+            # For a consistent order, you could sort them before joining:
+            # mapfile -t sorted_unique_tags < <(printf "%s\n" "${all_tags_for_this_container[@]}" | sort -u)
+            # For now, let's just join what we have, which should be unique.
+            local final_issues_string=""
+            if [ ${#all_tags_for_this_container[@]} -gt 0 ]; then
+                final_issues_string="${all_tags_for_this_container[0]}" # First element
+                for ((j=1; j<${#all_tags_for_this_container[@]}; j++)); do # Loop from the second
+                    final_issues_string+=", ${all_tags_for_this_container[$j]}"
+                done
+            fi
+            CONTAINER_ISSUES_MAP["$container_actual_name"]="$final_issues_string"
         fi
         echo "-------------------------------------------------------------------------"
     done
