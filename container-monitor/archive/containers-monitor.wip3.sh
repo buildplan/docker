@@ -584,32 +584,31 @@ check_host_memory_usage() {
 
 print_summary() {
   local container_name_summary # loop variable
+  
+  # Print Host System Stats First
+  print_message "-------------------------- Host System Stats ---------------------------" "SUMMARY"
+  check_host_disk_usage   # This function will use print_message
+  check_host_memory_usage # This function will use print_message
+  # You can add calls to other host-level check functions here if you create more
+
+  # Then print Container Issues Summary
   if [ ${#WARNING_OR_ERROR_CONTAINERS[@]} -gt 0 ]; then
-    print_message "------------------------ Summary of Issues Found ------------------------" "SUMMARY"
+    print_message "------------------- Summary of Container Issues Found --------------------" "SUMMARY" # Adjusted title
     print_message "The following containers have warnings or errors: ⚠️" "SUMMARY"
-
-    # To ensure we list each container only once even if it was somehow added multiple times
-    # (though current logic adds it once if any issue), we can iterate unique names.
-    # However, current logic should be fine. If not, we can get unique names from map keys.
-
-    # Iterate through containers that had issues
-    # Using WARNING_OR_ERROR_CONTAINERS ensures order of detection if that matters,
-    # or use map keys for potentially different order: for container_name_summary in "${!CONTAINER_ISSUES_MAP[@]}"; do
-    local printed_containers=() # To handle unique printing if WARNING_OR_ERROR_CONTAINERS could have dupes
-                                # Not strictly necessary with current population logic but safe.
+    
+    local printed_containers=() # Handles ensuring each container name is printed once
     for container_name_summary in "${WARNING_OR_ERROR_CONTAINERS[@]}"; do
-        # Check if already printed this container's summary (if list could have duplicates)
-        if [[ " ${printed_containers[*]} " =~ " ${container_name_summary} " ]]; then
-            continue
-        fi
-        printed_containers+=("$container_name_summary")
+      if [[ " ${printed_containers[*]} " =~ " ${container_name_summary} " ]]; then
+        continue
+      fi
+      printed_containers+=("$container_name_summary")
 
-        local issues="${CONTAINER_ISSUES_MAP["$container_name_summary"]:-Unknown Issue}" # Default if somehow not in map
-        print_message "- ${container_name_summary} ❌ (Issues: ${issues})" "WARNING"
+      local issues="${CONTAINER_ISSUES_MAP["$container_name_summary"]:-Unknown Issue}"
+      print_message "- ${container_name_summary} ❌ (Issues: ${issues})" "WARNING"
     done
   else
-    print_message "------------------------ Summary of Issues Found ------------------------" "SUMMARY"
-    print_message "No issues found in monitored containers. All checks passed. ✅" "GOOD"
+    print_message "------------------- Summary of Container Issues Found --------------------" "SUMMARY" # Adjusted title
+    print_message "No issues found in monitored containers. All container checks passed. ✅" "GOOD"
   fi
   print_message "------------------------------------------------------------------------" "SUMMARY"
 }
