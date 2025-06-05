@@ -25,10 +25,6 @@ curl -o containers-monitor.sh https://raw.githubusercontent.com/buildplan/docker
 ```bash
 curl -o config.sh https://raw.githubusercontent.com/buildplan/docker/refs/heads/main/container-monitor/config.sh
 ```
-##### test version 
-```bash
-curl -o containers-monitor.testing.sh https://raw.githubusercontent.com/buildplan/docker/refs/heads/main/container-monitor/containers-monitor.testing.sh && chmod +x containers-monitor.testing.sh
-```
 
 **Note**: Always verify the integrity of downloaded scripts, especially when downloading from the internet.
 
