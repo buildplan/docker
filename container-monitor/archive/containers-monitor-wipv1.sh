@@ -44,20 +44,16 @@ COLOR_CYAN="\033[0;36m"
 COLOR_MAGENTA="\033[0;35m" # Magenta for Summary
 
 # --- Script Default Configuration Values ---
-# These are the base defaults. config.sh can override these via *_DEFAULT variables,
-# and environment variables can override the final values.
 _SCRIPT_DEFAULT_LOG_LINES_TO_CHECK=20
-_SCRIPT_DEFAULT_CHECK_FREQUENCY_MINUTES=360 # Currently for documentation; script is run by external scheduler
-_SCRIPT_DEFAULT_LOG_FILE="$(cd "$(dirname "$0")" && pwd)/docker-monitor.log" # Absolute path to log file in script's dir
-declare -a _SCRIPT_DEFAULT_CONTAINER_NAMES_ARRAY=() # Default is to monitor all running containers if no other config found
+_SCRIPT_DEFAULT_CHECK_FREQUENCY_MINUTES=360
+_SCRIPT_DEFAULT_LOG_FILE="$(cd "$(dirname "$0")" && pwd)/docker-monitor.log"
+declare -a _SCRIPT_DEFAULT_CONTAINER_NAMES_ARRAY=()
 
-# Initialize working config variables from script defaults
 LOG_LINES_TO_CHECK="$_SCRIPT_DEFAULT_LOG_LINES_TO_CHECK"
-CHECK_FREQUENCY_MINUTES="$_SCRIPT_DEFAULT_CHECK_FREQUENCY_MINUTES" # Retain for consistency if used later
+CHECK_FREQUENCY_MINUTES="$_SCRIPT_DEFAULT_CHECK_FREQUENCY_MINUTES"
 LOG_FILE="$_SCRIPT_DEFAULT_LOG_FILE"
-declare -a CONTAINER_NAMES_FROM_CONFIG_FILE=() # Will hold 'CONTAINER_NAMES_DEFAULT' from config.sh
+declare -a CONTAINER_NAMES_FROM_CONFIG_FILE=()
 
-# --- Source Configuration File ---
 _CONFIG_FILE_PATH="$(cd "$(dirname "$0")" && pwd)/config.sh"
 if [ -f "$_CONFIG_FILE_PATH" ]; then
   source "$_CONFIG_FILE_PATH"
@@ -73,12 +69,10 @@ else
   echo -e "${COLOR_YELLOW}[WARNING]${COLOR_RESET} Configuration file '$_CONFIG_FILE_PATH' not found. Using script defaults or environment variables."
 fi
 
-# --- Override with Environment Variables ---
 LOG_LINES_TO_CHECK="${LOG_LINES_TO_CHECK:-$LOG_LINES_TO_CHECK}"
 CHECK_FREQUENCY_MINUTES="${CHECK_FREQUENCY_MINUTES:-$CHECK_FREQUENCY_MINUTES}"
 LOG_FILE="${LOG_FILE:-$LOG_FILE}"
 
-# --- Prerequisite Checks ---
 if ! command -v docker >/dev/null 2>&1; then
     echo -e "${COLOR_RED}[FATAL]${COLOR_RESET} Docker command not found. Please install Docker." >&2
     exit 1
@@ -87,8 +81,8 @@ if ! command -v jq >/dev/null 2>&1; then
     echo -e "${COLOR_RED}[FATAL]${COLOR_RESET} jq command not found. Please install jq." >&2
     exit 1
 fi
+# skopeo check will be done within the function that needs it.
 
-# Ensure LOG_LINES_TO_CHECK is a positive integer
 if ! [[ "$LOG_LINES_TO_CHECK" =~ ^[0-9]+$ ]] || [ "$LOG_LINES_TO_CHECK" -le 0 ]; then
     echo -e "${COLOR_YELLOW}[WARNING]${COLOR_RESET} Invalid LOG_LINES_TO_CHECK value ('$LOG_LINES_TO_CHECK'). Using default: $_SCRIPT_DEFAULT_LOG_LINES_TO_CHECK." >&2
     LOG_LINES_TO_CHECK="$_SCRIPT_DEFAULT_LOG_LINES_TO_CHECK"
@@ -166,7 +160,7 @@ check_container_status() {
       return 0
     else
       print_message "  Status: Running (Status: $status, Health: $health_status, CPU: $cpu_percent, Mem: $mem_percent)" "WARNING"
-      return 1
+      return 1 # Or 0 if this intermediate health status is acceptable
     fi
   fi
 }
@@ -192,132 +186,206 @@ check_container_restarts() {
 }
 
 check_for_updates() {
-    local container_name="$1"    # For messaging
+    local container_name="$1"
     local current_image_ref="$2" # {{.Config.Image}} value, e.g., "registry.name/image:tag"
-    # No longer needs $inspect_data (the container's inspect JSON) for RepoDigests
+    # The third argument $inspect_data for RepoDigests is no longer directly needed here with the refined local digest logic
 
-    # Declare other variables used within this function as local
-    local registry_host image_path_for_skopeo tag image_name_no_tag first_part skopeo_image_ref
-    local search_pattern_in_repodigests local_digest_line local_digest skopeo_output skopeo_exit_code remote_digest
+    local registry_host image_path_for_skopeo current_tag image_name_no_tag first_part skopeo_image_ref_for_digest
+    local search_pattern_in_repodigests local_digest_line local_digest skopeo_output_digest skopeo_exit_code_digest remote_digest
+    local update_for_pinned_tag_found=0 # 0 = no update for pinned tag, 1 = update found for pinned tag
+    local newer_version_tag_found=0   # 0 = no newer version tag, 1 = newer version tag found
 
-    tag="latest" # Default tag
+    if ! command -v skopeo >/dev/null 2>&1; then
+        print_message "  Update Check: Error - skopeo is not installed. Cannot check for updates for '$container_name'." "DANGER"
+        return 1 # skopeo is critical for this function
+    fi
+    if ! command -v sort >/dev/null 2>&1 || ! sort --version-sort --help >/dev/null 2>&1; then
+        print_message "  Update Check: Error - 'sort --version-sort' is not available. Cannot compare version tags." "DANGER"
+        # Depending on strictness, you might return 1 here or allow digest check to proceed
+    fi
 
-    # Handle cases where update check by tag is not applicable (same as before)
+
+    # --- Initial checks for applicability ---
     if [[ "$current_image_ref" == *@sha256:* ]]; then
-        print_message "  Update Check: Container '$container_name' is running from an image pinned by digest ($current_image_ref). Update check by tag is not applicable." "INFO"
+        print_message "  Update Check: Container '$container_name' is running an image pinned by digest ($current_image_ref). Tag-based checks not applicable." "INFO"
         return 0
     fi
     if [[ "$current_image_ref" =~ ^sha256:[0-9a-fA-F]{64}$ ]]; then
-        print_message "  Update Check: Container '$container_name' is running directly from an image ID ($current_image_ref). Cannot determine registry to check for updates." "INFO"
+        print_message "  Update Check: Container '$container_name' is running directly from an image ID ($current_image_ref). Cannot determine registry." "INFO"
         return 0
     fi
 
-    # --- Image Parsing Logic (same as before) ---
+    # --- Image Parsing Logic ---
+    current_tag="latest" # Default tag
     image_name_no_tag="$current_image_ref"
     if [[ "$current_image_ref" == *":"* ]]; then
-        if [[ "${current_image_ref##*:}" =~ ^[0-9a-fA-F]{7,}$ && "${current_image_ref}" == *@* ]]; then
-            print_message "  Update Check: Image reference '$current_image_ref' for container '$container_name' appears to be digest-pinned. Skipping tag-based update check." "INFO"
+        # Guard against short digests being misinterpreted as tags if image name contains '@'
+        if [[ "${current_image_ref##*:}" =~ ^[0-9a-fA-F]{7,}$ && "${current_image_ref}" == *@* && !("${current_image_ref##*:}" =~ ^[0-9]+(\.[0-9]+){0,2}(-.+)?$) ]]; then
+            print_message "  Update Check: Image reference '$current_image_ref' for '$container_name' looks digest-pinned. Skipping tag-based checks." "INFO"
             return 0
         fi
-        tag="${current_image_ref##*:}"
+        current_tag="${current_image_ref##*:}"
         image_name_no_tag="${current_image_ref%:*}"
     fi
 
+    # Determine registry and image path for skopeo
     if [[ "$image_name_no_tag" == *"/"* ]]; then
         first_part=$(echo "$image_name_no_tag" | cut -d'/' -f1)
         if [[ "$first_part" == *"."* ]] || [[ "$first_part" == "localhost" ]] || [[ "$first_part" == *":"* ]]; then
             registry_host="$first_part"
             image_path_for_skopeo=$(echo "$image_name_no_tag" | cut -d'/' -f2-)
-        else
+        else # No domain in first part, assume Docker Hub
             registry_host="registry-1.docker.io"
-            image_path_for_skopeo="$image_name_no_tag"
+            image_path_for_skopeo="$image_name_no_tag" # This might need "library/" prepended for official images
+            if [[ "$image_name_no_tag" != *"/"* ]]; then # If it's an official image like "alpine"
+                 image_path_for_skopeo="library/$image_name_no_tag"
+            fi
         fi
-    else
+    else # Single name, assume official Docker Hub image
         registry_host="registry-1.docker.io"
         image_path_for_skopeo="library/$image_name_no_tag"
     fi
-    # --- End of Image Parsing Logic ---
+    skopeo_image_ref_for_digest="docker://$registry_host/$image_path_for_skopeo:$current_tag"
 
-    skopeo_image_ref="docker://$registry_host/$image_path_for_skopeo:$tag"
-
-    if ! command -v skopeo >/dev/null 2>&1; then
-        print_message "  Update Check: Error - skopeo is not installed. Cannot check for updates for '$container_name'." "DANGER"
-        return 1
-    fi
-
-    # --- Local Digest Retrieval (Reverted to original script's method) ---
-    # We need to find a RepoDigest that matches the registry and path we are checking against.
-    # $current_image_ref is the image name/tag/id docker has recorded for the container.
-    # Inspecting this $current_image_ref directly should give its RepoDigests.
+    # --- 1. Check for updates to the PINNED TAG (Digest Check) ---
+    print_message "  Pinned Tag Update Check: Checking remote for '$skopeo_image_ref_for_digest'..." "INFO"
     search_pattern_in_repodigests="^${registry_host}/${image_path_for_skopeo}@"
-    
-    # Perform docker inspect on the image reference itself (current_image_ref)
     local_digest_line=$(docker inspect -f '{{range .RepoDigests}}{{.}}{{println}}{{end}}' "$current_image_ref" 2>/dev/null | grep -E "$search_pattern_in_repodigests" | head -n 1)
-
-    local_digest="" # Initialized to empty
+    local_digest=""
     if [[ -n "$local_digest_line" && "$local_digest_line" == *@* ]]; then
         local_digest="${local_digest_line##*@}"
-    else
-        # This message is printed if the primary search above fails
-        print_message "  Update Check: No local RepoDigest found for '$current_image_ref' matching '$search_pattern_in_repodigests'. Attempting fallback using first available RepoDigest. This might be less accurate." "INFO"
-        
-        # Fallback: Perform another docker inspect on the image reference
-        local_digest_line=$(docker inspect -f '{{index .RepoDigests 0}}' "$current_image_ref" 2>/dev/null)
-
-        if [[ -n "$local_digest_line" && "$local_digest_line" == *@* ]]; then
-            local_digest="${local_digest_line##*@}"
-        fi
     fi
 
     if [ -z "$local_digest" ]; then
-        # This message is printed if both primary and fallback fail to yield a digest
-        print_message "  Update Check: Failed to determine local image digest for '$current_image_ref' ($registry_host/$image_path_for_skopeo). Image may not have suitable RepoDigests or was only built locally. Cannot check for updates." "WARNING"
-        return 1
-    fi
-    # --- End of Local Digest Retrieval ---
-
-    print_message "  Update Check: Checking remote image '$skopeo_image_ref' for updates..." "INFO"
-    # Skopeo logic remains the same; using here-string for its jq call is fine.
-    skopeo_output=$(skopeo inspect "$skopeo_image_ref" 2>&1)
-    skopeo_exit_code=$?
-
-    remote_digest=""
-    if [ $skopeo_exit_code -eq 0 ]; then
-        remote_digest=$(jq -r '.Digest' <<< "$skopeo_output") # Using here-string
-        if [ "$remote_digest" == "null" ] || [ -z "$remote_digest" ]; then
-            print_message "  Update Check: Error - skopeo inspect succeeded for '$skopeo_image_ref' but returned no digest." "DANGER"
-            print_message "    Skopeo output: $skopeo_output" "INFO"
-            return 1
-        fi
-    else
-        # Error handling for skopeo (same as before)
-        print_message "  Update Check: Error inspecting remote image '$skopeo_image_ref'." "DANGER"
-        if echo "$skopeo_output" | grep -qiE "unauthorized|authentication required|denied|forbidden|credentials"; then
-            print_message "    Error details: Authentication failed. Ensure you are logged into '$registry_host' (e.g., run 'docker login $registry_host')." "DANGER"
-        elif echo "$skopeo_output" | grep -qiE "manifest unknown|not found|no such host"; then
-            print_message "    Error details: Image or tag not found at remote registry, or registry host is invalid: '$skopeo_image_ref'." "DANGER"
+        # Fallback if specific repo digest not found, try any repo digest
+        local_digest_line=$(docker inspect -f '{{index .RepoDigests 0}}' "$current_image_ref" 2>/dev/null)
+         if [[ -n "$local_digest_line" && "$local_digest_line" == *@* ]]; then
+            local_digest="${local_digest_line##*@}"
+            print_message "    Local Digest: Using fallback RepoDigest: $local_digest (less specific)" "INFO"
         else
-            print_message "    Skopeo command failed with exit code $skopeo_exit_code." "WARNING"
+            print_message "    Local Digest: Failed to determine local image digest for '$current_image_ref'. Cannot perform digest check for pinned tag." "WARNING"
+            # We can still proceed to check for newer version tags if applicable
         fi
-        print_message "    Full skopeo error: $skopeo_output" "INFO" # Log full error for debugging
-        return 1
+    else
+        print_message "    Local Digest: $local_digest (for $current_tag)" "INFO"
     fi
 
-    print_message "  Comparing Local: $local_digest (from $current_image_ref) vs Remote: $remote_digest (from $skopeo_image_ref)" "INFO"
-    if [ "$remote_digest" != "$local_digest" ]; then
-        print_message "  Update Check: Update available for '$current_image_ref'!\n  Current Digest (local): $local_digest\n  New Digest (remote):    $remote_digest" "WARNING"
+    if [ -n "$local_digest" ]; then # Only proceed if we have a local digest
+        skopeo_output_digest=$(skopeo inspect "$skopeo_image_ref_for_digest" 2>&1)
+        skopeo_exit_code_digest=$?
+        remote_digest=""
+        if [ $skopeo_exit_code_digest -eq 0 ]; then
+            remote_digest=$(jq -r '.Digest' <<< "$skopeo_output_digest")
+            if [ "$remote_digest" == "null" ] || [ -z "$remote_digest" ]; then
+                print_message "    Remote Digest: Skopeo inspect for '$skopeo_image_ref_for_digest' gave no digest." "WARNING"
+            else
+                 print_message "    Remote Digest: $remote_digest (for $current_tag)" "INFO"
+            fi
+        else
+            print_message "    Remote Digest: Error inspecting '$skopeo_image_ref_for_digest'." "WARNING"
+            # Log details as before, but don't exit the whole function yet
+            if echo "$skopeo_output_digest" | grep -qiE "unauthorized|authentication|denied|forbidden"; then
+                print_message "      Error details: Authentication failed for '$registry_host'." "WARNING"
+            elif echo "$skopeo_output_digest" | grep -qiE "manifest unknown|not found|no such host"; then
+                print_message "      Error details: Image or tag not found at remote: '$skopeo_image_ref_for_digest'." "WARNING"
+            else
+                print_message "      Skopeo failed (code $skopeo_exit_code_digest): ${skopeo_output_digest%%$'\n'*}" "WARNING" # First line of error
+            fi
+        fi
+
+        if [ -n "$remote_digest" ] && [ "$remote_digest" != "$local_digest" ]; then
+            print_message "  Pinned Tag Update Check: Update available for your pinned tag '$current_image_ref'!\n    Current Digest (local): $local_digest\n    New Digest (remote):    $remote_digest" "WARNING"
+            update_for_pinned_tag_found=1
+        elif [ -n "$remote_digest" ]; then # Implies remote_digest == local_digest
+            print_message "  Pinned Tag Update Check: Your pinned tag '$current_image_ref' is up-to-date (digests match)." "GOOD"
+        fi
+    fi # End of local_digest check block
+
+
+    # --- 2. Check for NEWER VERSION TAGS (e.g., 1.1 vs 1.2) ---
+    # This check is most relevant if current_tag looks like a version number and is not 'latest'.
+    # Basic check for version-like tags (e.g., vX.Y, X.Y.Z, vX.Y.Z-suffix)
+    if [[ "$current_tag" != "latest" && "$current_tag" =~ ^v?[0-9]+(\.[0-9]+){0,2}(-.+)?$ ]]; then
+        print_message "  Newer Version Tag Check: Listing tags for '$registry_host/$image_path_for_skopeo'..." "INFO"
+        local skopeo_list_tags_ref="docker://$registry_host/$image_path_for_skopeo"
+        local remote_tags_json remote_tags_list skopeo_list_exit_code
+        
+        remote_tags_json=$(skopeo list-tags "$skopeo_list_tags_ref" 2>&1)
+        skopeo_list_exit_code=$?
+
+        if [ $skopeo_list_exit_code -ne 0 ]; then
+            print_message "    Newer Version Tag Check: Failed to list tags for '$skopeo_list_tags_ref'." "WARNING"
+            if echo "$remote_tags_json" | grep -qiE "unauthorized|authentication|denied|forbidden"; then
+                 print_message "      Error details: Authentication failed for '$registry_host'." "WARNING"
+            elif echo "$remote_tags_json" | grep -qiE "not found|no such host"; then # repository not found
+                 print_message "      Error details: Repository not found or host invalid: '$skopeo_list_tags_ref'." "WARNING"
+            else
+                 print_message "      Skopeo list-tags failed (code $skopeo_list_exit_code): ${remote_tags_json%%$'\n'*}" "WARNING"
+            fi
+        else
+            # Parse tags, filter for valid-looking versions, sort, and find the highest.
+            # This grep aims for X.Y or X.Y.Z, possibly with suffixes like -alpine, -rc1
+            # It's not perfect for all semver but good for common cases.
+            # Exclude the current tag itself from the list of candidates for "newer".
+            highest_remote_version_tag=$(echo "$remote_tags_json" | jq -r '.Tags[]' 2>/dev/null | \
+              grep -E '^v?[0-9]+(\.[0-9]+){1,2}(-.+)?$' | \
+              grep -vE "^${current_tag}$" | \
+              sort -V | tail -n 1) # Get the highest version tag
+
+            if [[ -n "$highest_remote_version_tag" ]]; then
+                # Now compare current_tag with highest_remote_version_tag using sort -V
+                # If current_tag sorts before highest_remote_version_tag, then highest is newer.
+                # (printf "%s\n%s" item1 item2 | sort -V | head -n1) gives the "smaller" version
+                local sorted_first
+                sorted_first=$(printf "%s\n%s" "$current_tag" "$highest_remote_version_tag" | sort -V | head -n 1)
+
+                if [[ "$sorted_first" == "$current_tag" && "$current_tag" != "$highest_remote_version_tag" ]]; then
+                    print_message "  Newer Version Tag Check: Newer version '$highest_remote_version_tag' found for '$image_name_no_tag' (you are on '$current_tag')." "WARNING"
+                    newer_version_tag_found=1
+                else
+                    print_message "  Newer Version Tag Check: No clearly newer semantic version tag found than '$current_tag'." "GOOD"
+                fi
+            else
+                print_message "  Newer Version Tag Check: No other semantic version tags found to compare against '$current_tag'." "INFO"
+            fi
+        fi
+    else
+        if [[ "$current_tag" == "latest" ]]; then
+             print_message "  Newer Version Tag Check: Skipped for 'latest' tag (pinned tag digest check covers 'latest')." "INFO"
+
+        elif ! [[ "$current_tag" =~ ^v?[0-9]+(\.[0-9]+){0,2}(-.+)?$ ]]; then # If not like a version
+            print_message "  Newer Version Tag Check: Skipped as current tag '$current_tag' does not appear to be a semantic version (or is 'latest')." "INFO"
+        fi
+    fi
+
+    # --- Final Result ---
+    if [ $update_for_pinned_tag_found -eq 1 ] || [ $newer_version_tag_found -eq 1 ]; then
+        # If either check found something, return 1 (issue/update)
         return 1
     else
-        print_message "  Update Check: Image '$current_image_ref' is up-to-date." "GOOD"
+        # If both checks passed or were not applicable in a way that signals an issue
+        if [ -z "$local_digest" ] && [[ "$current_tag" != "latest" && ! ("$current_tag" =~ ^[0-9]+(\.[0-9]+){0,2}(-.+)?$) ]]; then
+            # If we couldn't get local_digest AND we didn't do a version check (e.g. tag was 'stable')
+            # This path indicates uncertainty rather than "good"
+            print_message "  Update Check: Overall status for '$current_image_ref' is uncertain due to missing local digest and non-versioned tag." "INFO"
+            return 0 # Or 1 if uncertainty should be flagged
+        elif [ -z "$local_digest" ] && [ $newer_version_tag_found -eq 0 ]; then
+            # Could not get local digest, but newer version check ran and found nothing.
+            # Still, the primary pinned tag check was inconclusive.
+            print_message "  Update Check: Pinned tag digest check inconclusive, but no newer semantic version tags found." "INFO"
+            return 0 # Or 1 to flag the inconclusive digest check
+        fi
+        # Otherwise, if we are here, it means either digest check was good and no newer tag,
+        # or one of the checks was N/A but the other was good.
         return 0
     fi
 }
+
 
 check_logs() {
   local container_name="$1"
   local print_to_stdout="${2:-false}" # Default false
   local filter_errors="${3:-false}"   # Default false
-  # LOG_LINES_TO_CHECK is a global variable, validated to be a positive integer at script start
   local raw_logs docker_logs_status logs_to_display_or_analyze issues_found_by_grep
 
   raw_logs=$(docker logs --tail "$LOG_LINES_TO_CHECK" "$container_name" 2>&1)
@@ -325,8 +393,8 @@ check_logs() {
 
   if [ $docker_logs_status -ne 0 ]; then
     print_message "  Log Check: Error - Could not retrieve logs for '$container_name'. Docker command failed (status: $docker_logs_status)." "DANGER"
-    print_message "    Docker error: $raw_logs" "INFO" # Show the actual error from Docker
-    return 1 # Definite error retrieving logs
+    print_message "    Docker error: $raw_logs" "INFO"
+    return 1
   fi
 
   logs_to_display_or_analyze="$raw_logs"
@@ -337,7 +405,7 @@ check_logs() {
       logs_to_display_or_analyze=$(echo "$raw_logs" | grep -i -E 'error|panic|fail|fatal')
       issues_found_by_grep=true
     else
-      logs_to_display_or_analyze="" # No errors found by grep
+      logs_to_display_or_analyze=""
     fi
   fi
 
@@ -351,12 +419,12 @@ check_logs() {
     if [ -n "$logs_to_display_or_analyze" ]; then
       echo "$logs_to_display_or_analyze"
     else
-      if [ "$filter_errors" = "true" ]; then # No errors found by grep
+      if [ "$filter_errors" = "true" ]; then
         echo "No lines matching error patterns ('error|panic|fail|fatal') found."
-      elif [ -z "$raw_logs" ]; then # Not filtering, and raw_logs itself was empty
+      elif [ -z "$raw_logs" ]; then
         echo "No log output in the last $LOG_LINES_TO_CHECK lines."
-      else # Not filtering, raw_logs had content, but somehow logs_to_display_or_analyze is empty
-        echo "No log output in the last $LOG_LINES_TO_CHECK lines."
+      else
+        echo "No log output in the last $LOG_LINES_TO_CHECK lines." # Fallback
       fi
     fi
     echo "-------------------------"
@@ -364,30 +432,25 @@ check_logs() {
 
   # Determine status message and return code for monitoring summary
   if [ "$filter_errors" = "true" ]; then
-    # This mode is typically for direct CLI use ('logs errors ...'), not the main monitoring loop.
-    # The return code here doesn't affect WARNING_OR_ERROR_CONTAINERS in the main loop directly
-    # as 'logs' command exits before summary.
     if [ "$issues_found_by_grep" = "true" ]; then
       print_message "  Log Check: Errors/warnings found in recent logs (when filtering)." "WARNING"
-      return 0 # Check ran, found issues as per filter.
+      return 0
     else
       print_message "  Log Check: No specific errors/warnings found in recent logs (when filtering)." "GOOD"
       return 0
     fi
-  else
-    # This is the path taken during the main monitoring loop (filter_errors=false)
-    if [ -n "$raw_logs" ]; then # Logs were retrieved
+  else # This is the path taken during the main monitoring loop
+    if [ -n "$raw_logs" ]; then
       if echo "$raw_logs" | grep -q -i -E 'error|panic|fail|fatal'; then
           print_message "  Log Check: Potential errors/warnings found in recent $LOG_LINES_TO_CHECK lines. Please review." "WARNING"
-          return 1 # MODIFIED: Return 1 to indicate an issue found, for summary purposes
+          return 1
       else
           print_message "  Log Check: Logs retrieved (last $LOG_LINES_TO_CHECK lines). No obvious widespread errors found." "GOOD"
           return 0
       fi
-    else # No logs retrieved (docker logs command succeeded but returned empty output for the given tail count)
-      print_message "  Log Check: No log output in last $LOG_LINES_TO_CHECK lines." "INFO"
-      # This already correctly returns 1, flagging it for summary if "no logs" is considered an issue.
-      return 1
+    else
+      print_message "  Log Check: No log output in last $LOG_LINES_TO_CHECK lines." "INFO" # Could be normal for some containers
+      return 0 # Changed from 1; no logs isn't always an error state for monitoring. If it IS an error, other checks should catch it.
     fi
   fi
 }
@@ -409,7 +472,7 @@ print_summary() {
     print_message "------------------------ Summary of Issues Found ------------------------" "SUMMARY"
     print_message "The following containers have warnings or errors: ⚠️" "SUMMARY"
     for container_name_summary in "${WARNING_OR_ERROR_CONTAINERS[@]}"; do
-      print_message "- ${container_name_summary} ❌" "WARNING"
+      print_message "- ${container_name_summary} ❌" "WARNING" # Changed from DANGER to WARNING for summary items
     done
     print_message "------------------------------------------------------------------------" "SUMMARY"
   else
@@ -420,13 +483,10 @@ print_summary() {
 }
 
 # --- Main Execution ---
-
 declare -a CONTAINERS_TO_CHECK=()
 declare -a WARNING_OR_ERROR_CONTAINERS=()
 
-# Variables used in main execution block (not local because this is top-level script body)
-# These were the source of `local: can only be used in a function` if 'local' was used here.
-c_name="" # For 'logs' command
+c_name=""
 name_from_env=""
 name_trimmed=""
 inspect_json=""
@@ -441,16 +501,17 @@ log_check_result=0
 run_monitoring=false
 log_dir_final=""
 
+
 if [ "$#" -gt 0 ]; then
   case "$1" in
     logs)
+      # ... (logs handling logic remains the same) ...
       if [ "$#" -eq 1 ]; then
         mapfile -t all_running_containers < <(docker container ls -q 2>/dev/null)
         if [ ${#all_running_containers[@]} -eq 0 ]; then
           print_message "No running containers found to show logs for." "INFO"
         else
           for container_id_logs in "${all_running_containers[@]}"; do
-            # Removed 'local' from c_name
             c_name=$(docker container inspect -f '{{.Name}}' "$container_id_logs" | sed 's|^/||' 2>/dev/null || echo "$container_id_logs")
             check_logs "$c_name" "true" "false"
             echo "----------------------"
@@ -467,6 +528,7 @@ if [ "$#" -gt 0 ]; then
       exit 0
       ;;
     save)
+      # ... (save logs logic remains the same) ...
       if [ "$#" -eq 3 ] && [ "$2" = "logs" ]; then
         save_logs "$3"
       else
@@ -480,22 +542,22 @@ if [ "$#" -gt 0 ]; then
       ;;
   esac
 elif [ "$#" -eq 0 ]; then
+    # ... (logic for determining containers to check from ENV or config remains the same) ...
     if [ -n "$CONTAINER_NAMES" ]; then
         IFS=',' read -r -a temp_env_names <<< "$CONTAINER_NAMES"
         for name_from_env in "${temp_env_names[@]}"; do
-            # Removed 'local' from name_trimmed
-            name_trimmed="${name_from_env#"${name_from_env%%[![:space:]]*}"}"
-            name_trimmed="${name_trimmed%"${name_trimmed##*[![:space:]]}"}"
+            name_trimmed="${name_from_env#"${name_from_env%%[![:space:]]*}"}" # trim leading
+            name_trimmed="${name_trimmed%"${name_trimmed##*[![:space:]]}"}"   # trim trailing
             if [ -n "$name_trimmed" ]; then
                 CONTAINERS_TO_CHECK+=("$name_trimmed")
             fi
         done
-        if [ ${#CONTAINERS_TO_CHECK[@]} -eq 0 ] && [ -n "$CONTAINER_NAMES" ]; then
-            print_message "Warning: Environment variable CONTAINER_NAMES ('$CONTAINER_NAMES') was set but parsed to an empty list of containers." "WARNING"
+        if [ ${#CONTAINERS_TO_CHECK[@]} -eq 0 ] && [ -n "$CONTAINER_NAMES" ]; then # Guard against empty list if var was set
+            print_message "Warning: Environment variable CONTAINER_NAMES ('$CONTAINER_NAMES') was set but parsed to an empty list." "WARNING"
         fi
     elif [ ${#CONTAINER_NAMES_FROM_CONFIG_FILE[@]} -gt 0 ]; then
         CONTAINERS_TO_CHECK=("${CONTAINER_NAMES_FROM_CONFIG_FILE[@]}")
-    else
+    else # Default to all running containers if no other source provides names
         mapfile -t all_running_names < <(docker container ls --format '{{.Names}}' 2>/dev/null)
         if [ ${#all_running_names[@]} -gt 0 ]; then
             CONTAINERS_TO_CHECK=("${all_running_names[@]}")
@@ -503,38 +565,42 @@ elif [ "$#" -eq 0 ]; then
     fi
 fi
 
+
 # --- Main Monitoring Execution Block ---
 run_monitoring=false
-if [[ "$#" -gt 0 && "$1" != "logs" && "$1" != "save" ]]; then
+if [[ "$#" -gt 0 && "$1" != "logs" && "$1" != "save" ]]; then # Explicit container names from args
     if [ ${#CONTAINERS_TO_CHECK[@]} -gt 0 ]; then
         run_monitoring=true
     else
         print_message "No valid container names provided for monitoring from command line arguments." "INFO"
     fi
-elif [[ "$#" -eq 0 ]]; then
+elif [[ "$#" -eq 0 ]]; then # No args, determined by ENV, config, or all running
     if [ ${#CONTAINERS_TO_CHECK[@]} -gt 0 ]; then
         run_monitoring=true
     else
         print_message "No containers specified or found running to monitor." "INFO"
+        # If LOG_FILE is set, we might still want to finalize it.
     fi
 fi
+
 
 if [ "$run_monitoring" = "true" ]; then
     print_message "---------------------- Docker Container Monitoring Results ----------------------" "INFO"
     for container_name_or_id in "${CONTAINERS_TO_CHECK[@]}"; do
         print_message "Container: ${container_name_or_id}" "INFO"
+        container_actual_name="${container_name_or_id}" # For consistent naming in messages if ID was given
 
-        # Removed 'local' from inspect_json
         inspect_json=$(docker inspect "$container_name_or_id" 2>/dev/null)
-
         if [ -z "$inspect_json" ]; then
             print_message "  Status: Container '${container_name_or_id}' not found or inspect failed." "DANGER"
             WARNING_OR_ERROR_CONTAINERS+=("$container_name_or_id")
             echo "-------------------------------------------------------------------------"
             continue
         fi
+        # Get the actual name in case an ID was provided
+        container_actual_name=$(echo "$inspect_json" | jq -r '.[0].Name' | sed 's|^/||')
 
-        # Removed 'local' from stats_json, cpu_percent, mem_percent
+
         stats_json=$(docker stats --no-stream --format '{{json .}}' "$container_name_or_id" 2>/dev/null)
         cpu_percent="N/A"
         mem_percent="N/A"
@@ -542,28 +608,28 @@ if [ "$run_monitoring" = "true" ]; then
             cpu_percent=$(echo "$stats_json" | jq -r '.CPUPerc // "N/A"')
             mem_percent=$(echo "$stats_json" | jq -r '.MemPerc // "N/A"')
         else
-            print_message "  Resource Usage: Could not retrieve stats for '$container_name_or_id'." "WARNING"
+            print_message "  Resource Usage: Could not retrieve stats for '$container_actual_name'." "WARNING"
         fi
 
-        check_container_status "$container_name_or_id" "$inspect_json" "$cpu_percent" "$mem_percent"
+        check_container_status "$container_actual_name" "$inspect_json" "$cpu_percent" "$mem_percent"
         status_check_result=$?
 
-        check_container_restarts "$container_name_or_id" "$inspect_json"
+        check_container_restarts "$container_actual_name" "$inspect_json"
         restart_check_result=$?
 
-        # Removed 'local' from current_image_ref_for_update
         current_image_ref_for_update=$(echo "$inspect_json" | jq -r '.[0].Config.Image')
-        check_for_updates "$container_name_or_id" "$current_image_ref_for_update" "$inspect_json"
+        # Pass container_actual_name for clearer messaging in check_for_updates
+        check_for_updates "$container_actual_name" "$current_image_ref_for_update"
         update_check_result=$?
 
-        check_logs "$container_name_or_id" "false" "false"
+        check_logs "$container_actual_name" "false" "false"
         log_check_result=$?
 
         if [ $status_check_result -ne 0 ] || \
            [ $restart_check_result -ne 0 ] || \
            [ $update_check_result -ne 0 ] || \
            [ $log_check_result -ne 0 ]; then
-            WARNING_OR_ERROR_CONTAINERS+=("$container_name_or_id")
+            WARNING_OR_ERROR_CONTAINERS+=("$container_actual_name")
         fi
         echo "-------------------------------------------------------------------------"
     done
@@ -578,17 +644,18 @@ if [ -n "$LOG_FILE" ]; then
     mkdir -p "$log_dir_final"
     if [ $? -ne 0 ]; then
       echo -e "${COLOR_RED}[ERROR]${COLOR_RESET} Could not create log directory '$log_dir_final'. Logging to file will be disabled."
-      LOG_FILE=""
+      LOG_FILE="" # Disable logging if dir creation fails
     fi
   fi
 
-  if [ -n "$LOG_FILE" ] && ! [ -f "$LOG_FILE" ]; then
-    touch "$LOG_FILE"
-    if [ $? -ne 0 ]; then
-      echo -e "${COLOR_RED}[ERROR]${COLOR_RESET} Could not create log file '$LOG_FILE'. Logging to file will be disabled for this run."
-      LOG_FILE=""
-    else
-      echo -e "${COLOR_CYAN}[INFO]${COLOR_RESET} Log file '$LOG_FILE' created."
+  # Check if LOG_FILE is writable, try to create if not exists
+  if [ -n "$LOG_FILE" ]; then # Re-check as it might have been unset
+    if ! touch "$LOG_FILE" &>/dev/null; then
+        echo -e "${COLOR_RED}[ERROR]${COLOR_RESET} Log file '$LOG_FILE' is not writable or cannot be created. Logging to file disabled." >&2
+        LOG_FILE=""
+    elif [ ! -f "$LOG_FILE" ]; then # Should have been created by touch if it didn't exist
+        # This case is unlikely if touch succeeded, but as a safeguard
+        echo -e "${COLOR_CYAN}[INFO]${COLOR_RESET} Log file '$LOG_FILE' created."
     fi
   fi
 fi
