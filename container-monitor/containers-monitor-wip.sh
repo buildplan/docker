@@ -301,10 +301,11 @@ check_for_updates() {
         fi
     fi # End of local_digest check block
 
+
     # --- 2. Check for NEWER VERSION TAGS (e.g., 1.1 vs 1.2) ---
     # This check is most relevant if current_tag looks like a version number and is not 'latest'.
-    # Basic check for version-like tags (e.g., X.Y, X.Y.Z, allow -suffix)
-    if [[ "$current_tag" != "latest" && "$current_tag" =~ ^[0-9]+(\.[0-9]+){0,2}(-.+)?$ ]]; then
+    # Basic check for version-like tags (e.g., vX.Y, X.Y.Z, vX.Y.Z-suffix)
+    if [[ "$current_tag" != "latest" && "$current_tag" =~ ^v?[0-9]+(\.[0-9]+){0,2}(-.+)?$ ]]; then
         print_message "  Newer Version Tag Check: Listing tags for '$registry_host/$image_path_for_skopeo'..." "INFO"
         local skopeo_list_tags_ref="docker://$registry_host/$image_path_for_skopeo"
         local remote_tags_json remote_tags_list skopeo_list_exit_code
@@ -327,9 +328,9 @@ check_for_updates() {
             # It's not perfect for all semver but good for common cases.
             # Exclude the current tag itself from the list of candidates for "newer".
             highest_remote_version_tag=$(echo "$remote_tags_json" | jq -r '.Tags[]' 2>/dev/null | \
-                grep -E '^[0-9]+(\.[0-9]+){1,2}(-.+)?$' | \
-                grep -vE "^${current_tag}$" | \
-                sort -V | tail -n 1) # Get the highest version tag
+              grep -E '^v?[0-9]+(\.[0-9]+){1,2}(-.+)?$' | \
+              grep -vE "^${current_tag}$" | \
+              sort -V | tail -n 1) # Get the highest version tag
 
             if [[ -n "$highest_remote_version_tag" ]]; then
                 # Now compare current_tag with highest_remote_version_tag using sort -V
@@ -351,8 +352,9 @@ check_for_updates() {
     else
         if [[ "$current_tag" == "latest" ]]; then
              print_message "  Newer Version Tag Check: Skipped for 'latest' tag (pinned tag digest check covers 'latest')." "INFO"
-        elif ! [[ "$current_tag" =~ ^[0-9]+(\.[0-9]+){0,2}(-.+)?$ ]]; then # If not like a version
-             print_message "  Newer Version Tag Check: Skipped as current tag '$current_tag' does not appear to be a semantic version." "INFO"
+
+        elif ! [[ "$current_tag" =~ ^v?[0-9]+(\.[0-9]+){0,2}(-.+)?$ ]]; then # If not like a version
+            print_message "  Newer Version Tag Check: Skipped as current tag '$current_tag' does not appear to be a semantic version (or is 'latest')." "INFO"
         fi
     fi
 
