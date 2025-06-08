@@ -1,0 +1,123 @@
+networks:
+  auth_net:
+    name: auth_net
+    driver: bridge
+
+services:
+
+  traefik:
+    image: docker.io/library/traefik:${TRAEFIK_TAG} # From .env
+    container_name: ${COMPOSE_PROJECT_NAME}_traefik
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true] # Security hardening
+    ports: ["80:80", "443:443"] # Expose HTTP and HTTPS ports
+    # Pass all variables from .env file into this container's environment
+    # This allows Traefik's YML configs to use {$VAR_NAME} syntax.
+    env_file: .env
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro # To listen to Docker events for service discovery
+      - ./traefik_config/traefik.yml:/etc/traefik/traefik.yml:ro # Static config
+      - ./traefik_config/dynamic:/etc/traefik/dynamic_conf:ro  # Directory for dynamic .yml files
+      - ./traefik_certs:/traefik_certs # Persist Let's Encrypt SSL certificates
+      - ./traefik_logs:/logs         # Persist Traefik access/error logs
+    networks:
+      - auth_net
+    labels:
+      - "traefik.enable=true" # Enable Traefik for itself (for dashboard)
+      # Traefik Dashboard Router - secured with basic auth from dynamic config
+      - "traefik.http.routers.traefik-dashboard.rule=Host(`${TRAEFIK_DASHBOARD_HOSTNAME}`)" # Reads from container env
+      - "traefik.http.routers.traefik-dashboard.entrypoints=websecure"
+      - "traefik.http.routers.traefik-dashboard.service=api@internal" # Internal Traefik API service
+      - "traefik.http.routers.traefik-dashboard.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.traefik-dashboard.middlewares=dashboardAuth@file" # Reference middleware
+    logging:
+      driver: "json-file"
+      options: { max-size: "10m", max-file: "3" }
+
+  postgresql:
+    image: docker.io/library/postgres:${POSTGRES_TAG} # From .env
+    container_name: ${COMPOSE_PROJECT_NAME}_postgres
+    restart: unless-stopped
+    volumes: ["./postgresql_data:/var/lib/postgresql/data"] # Persistent data
+    environment:
+      # These are directly interpolated by Docker Compose from the .env file
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_DB: ${POSTGRES_DB}
+      PGTZ: "UTC" # Recommended: Set timezone for PostgreSQL logs
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"], interval: 10s, timeout: 5s, retries: 5, start_period: 20s }
+    networks:
+      - auth_net
+    logging:
+      driver: "json-file"
+      options: { max-size: "10m", max-file: "2" }
+
+  valkey:
+    image: docker.io/valkey/valkey:${VALKEY_TAG} # From .env
+    container_name: ${COMPOSE_PROJECT_NAME}_valkey
+    restart: unless-stopped
+    command: ["valkey-server", "--save", "60 1", "--loglevel", "warning"] # Basic persistence & logging
+    volumes: ["./valkey_data:/data"] # Persistent data
+    healthcheck: { test: ["CMD", "valkey-cli", "ping"], interval: 10s, timeout: 5s, retries: 5, start_period: 20s }
+    networks:
+      - auth_net
+    logging:
+      driver: "json-file"
+      options: { max-size: "5m", max-file: "2" }
+
+  authentik-server:
+    image: ghcr.io/goauthentik/server:${AUTHENTIK_TAG} # From .env
+    container_name: ${COMPOSE_PROJECT_NAME}_server
+    restart: unless-stopped
+    command: server
+    env_file: .env # Pass all .env variables, Authentik picks up AUTHENTIK_* ones
+    environment: # Explicitly define connections for clarity, overriding any from env_file if needed
+      AUTHENTIK_POSTGRESQL__HOST: postgresql
+      AUTHENTIK_POSTGRESQL__USER: ${POSTGRES_USER} # Interpolated by Docker Compose
+      AUTHENTIK_POSTGRESQL__NAME: ${POSTGRES_DB}   # Interpolated by Docker Compose
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${POSTGRES_PASSWORD} # Interpolated by Docker Compose
+      AUTHENTIK_REDIS__HOST: valkey # Authentik uses 'REDIS' vars for Valkey due to client compatibility
+    volumes:
+      - ./authentik_media:/media
+      - ./authentik_templates:/templates
+    depends_on:
+      postgresql: { condition: service_healthy }
+      valkey: { condition: service_healthy }
+    networks:
+      - auth_net
+    logging:
+      driver: "json-file"
+      options: { max-size: "10m", max-file: "3" }
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.authentik.rule=Host(`${AUTHENTIK_HOSTNAME}`)" # Reads from container env
+      - "traefik.http.routers.authentik.entrypoints=websecure"
+      - "traefik.http.routers.authentik.service=authentik-svc"
+      - "traefik.http.routers.authentik.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.authentik.middlewares=defaultSecurityHeaders@file" # Apply security headers
+      - "traefik.http.services.authentik-svc.loadbalancer.server.port=9000" # Authentik's internal HTTP port
+
+  authentik-worker:
+    image: ghcr.io/goauthentik/server:${AUTHENTIK_TAG} # From .env
+    container_name: ${COMPOSE_PROJECT_NAME}_worker
+    restart: unless-stopped
+    command: worker
+    env_file: .env # Pass all .env variables
+    environment: # Explicit connections
+      AUTHENTIK_POSTGRESQL__HOST: postgresql
+      AUTHENTIK_POSTGRESQL__USER: ${POSTGRES_USER}
+      AUTHENTIK_POSTGRESQL__NAME: ${POSTGRES_DB}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${POSTGRES_PASSWORD}
+      AUTHENTIK_REDIS__HOST: valkey
+    volumes:
+      - ./authentik_media:/media # If worker needs media access
+      - ./authentik_templates:/templates
+    depends_on:
+      postgresql: { condition: service_healthy }
+      valkey: { condition: service_healthy }
+      authentik-server: { condition: service_started }
+    networks:
+      - auth_net
+    logging:
+      driver: "json-file"
+      options: { max-size: "10m", max-file: "3" }
