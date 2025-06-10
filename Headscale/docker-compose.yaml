@@ -171,11 +171,12 @@ services:
       - ./traefik/middlewares.yml:/etc/traefik/dynamic/middlewares.yml
     labels:
       # ---- traefik Dashboard Labels ----
-      - "traefik.http.middlewares.dashboard-auth.basicauth.users=${TRAEFIK_DASHBOARD_AUTH}"
+      # - "traefik.http.middlewares.dashboard-auth.basicauth.users=${TRAEFIK_DASHBOARD_AUTH}"
       - "traefik.http.routers.traefik-dashboard.rule=Host(`${TRAEFIK_DASHBOARD_URL}`)"
       - "traefik.http.routers.traefik-dashboard.entrypoints=websecure"
       - "traefik.http.routers.traefik-dashboard.tls.certresolver=myresolver"
-      - "traefik.http.routers.traefik-dashboard.middlewares=dashboard-auth"
+      - "traefik.http.routers.traefik-dashboard.middlewares=corsHeader@file,crowdsec-middleware@file,oVPSgeoBlock@file,oidcAuth@file"
+      # - "traefik.http.routers.traefik-dashboard.middlewares=dashboard-auth"
       - "traefik.http.routers.traefik-dashboard.service=api@internal"
 
       # ---- Router for HS_URL root redirect ----
@@ -232,10 +233,12 @@ services:
       - ./crowdsec/config:/etc/crowdsec:rw
       - ./crowdsec/data:/var/lib/crowdsec/data:rw
       - ./traefik/logs:/var/log/traefik:ro
+      - /var/log/syslog:/var/log/host_syslog:ro
       - /var/log/auth.log:/var/log/host_auth.log:ro
+      - /var/log/ufw.log:/var/log/host_ufw.log:ro
     environment:
       GID: "${GID:-1000}"
-      COLLECTIONS: "crowdsecurity/traefik crowdsecurity/sshd crowdsecurity/linux crowdsecurity/base-http-scenarios crowdsecurity/whitelist-good-actors crowdsecurity/appsec-virtual-patching crowdsecurity/appsec-generic-rules"
+      COLLECTIONS: "crowdsecurity/traefik crowdsecurity/sshd crowdsecurity/linux crowdsecurity/base-http-scenarios crowdsecurity/whitelist-good-actors crowdsecurity/appsec-virtual-patching crowdsecurity/appsec-generic-rules crowdsecurity/iptables"
     healthcheck:
       test: ["CMD-SHELL", "cscli lapi status || exit 1"]
       interval: 30s
