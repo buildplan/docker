@@ -2,7 +2,7 @@
 services:
   ## -- headscale --
   headscale:
-    image: headscale/headscale:0.26.0
+    image: headscale/headscale:0.26.1
     container_name: headscale
     restart: unless-stopped
     depends_on:
@@ -21,20 +21,25 @@ services:
       - "traefik.http.routers.headscale-rtr.tls.certresolver=myresolver"
       - "traefik.http.services.headscale-svc.loadbalancer.server.port=8080"  # Port for Headscale service
       - "traefik.http.routers.headscale-rtr.middlewares=corsHeader@file,secureHeaders@file,cspHeader@file,crowdsec-middleware@file,oVPSgeoBlock@file"
-
-  ## -- headplane --
-  headplane:
-    image: ghcr.io/tale/headplane:next
-    container_name: headplane
-    restart: unless-stopped
+      # - "alis.headplane.target=headscale"
     deploy:
       resources:
         limits:
-          cpus: '0.50'
-          memory: 512M
-        reservations:
-          cpus: '0.25'
-          memory: 128M
+          cpus: '1.0'
+          memory: 1024M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  ## -- headplane --
+  headplane:
+    image: ghcr.io/tale/headplane:0.6.0
+    container_name: headplane
+    restart: unless-stopped
+    environment:
+      - HEADPLANE_DEBUG_LOG=false
     volumes:
       - ./headplane/config.yaml:/etc/headplane/config.yaml
       - ./headscale/config/config.yaml:/etc/headscale/config.yaml
@@ -54,6 +59,17 @@ services:
       - "traefik.http.routers.headplane-rtr.tls.certresolver=myresolver"
       - "traefik.http.services.headplane-svc.loadbalancer.server.port=3000" # headplane port
       - "traefik.http.routers.headplane-rtr.middlewares=headplane-addslash@file,corsHeader@file,secureHeaders@file,cspHeader@file,crowdsec-middleware@file,oVPSgeoBlock@file"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 
   ## -- headscale-admin --
   headscale-admin:
@@ -71,7 +87,13 @@ services:
       - "traefik.http.routers.headscale-admin-extra-rtr.entrypoints=websecure"
       - "traefik.http.routers.headscale-admin-extra-rtr.tls.certresolver=myresolver"
       - "traefik.http.services.headscale-admin-extra-svc.loadbalancer.server.port=80"
-      - "traefik.http.routers.headscale-admin-extra-rtr.middlewares=corsHeader@file,crowdsec-middleware@file,oVPSgeoBlock@file"
+      - "traefik.http.routers.headscale-admin-extra-rtr.middlewares=corsHeader@file,crowdsec-middleware@file,oVPSgeoBlock@file,oidcAuth@file"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 
   ## -- cloudflare-dns-sync --
   cloudflare-dns-sync:
@@ -101,7 +123,7 @@ services:
 
   ## -- traefik proxy --
   traefik:
-    image: traefik:v3.4.0
+    image: traefik:v3.4.1
     restart: unless-stopped
     container_name: traefik
     depends_on:
@@ -118,7 +140,7 @@ services:
       - "--log.level=INFO"
       - "--ping=true"
       - "--api=true"
-      - "--api.dashboard=false"
+      - "--api.dashboard=true"
       - "--providers.docker"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.websecure.address=:443"
@@ -134,6 +156,9 @@ services:
       # --- GEOBLOCK PLUGIN ---
       - "--experimental.plugins.geoblock.modulename=github.com/PascalMinder/geoblock"
       - "--experimental.plugins.geoblock.version=v0.3.3"
+      # --- OIDC ---
+      - "--experimental.plugins.traefik-oidc-auth.modulename=github.com/sevensolutions/traefik-oidc-auth"
+      - "--experimental.plugins.traefik-oidc-auth.version=v0.11.0"
     ports:
       - "80:80"
       - "443:443"
@@ -145,6 +170,14 @@ services:
       - ./traefik/tls.yml:/etc/traefik/dynamic/tls.yml
       - ./traefik/middlewares.yml:/etc/traefik/dynamic/middlewares.yml
     labels:
+      # ---- traefik Dashboard Labels ----
+      - "traefik.http.middlewares.dashboard-auth.basicauth.users=${TRAEFIK_DASHBOARD_AUTH}"
+      - "traefik.http.routers.traefik-dashboard.rule=Host(`${TRAEFIK_DASHBOARD_URL}`)"
+      - "traefik.http.routers.traefik-dashboard.entrypoints=websecure"
+      - "traefik.http.routers.traefik-dashboard.tls.certresolver=myresolver"
+      - "traefik.http.routers.traefik-dashboard.middlewares=dashboard-auth"
+      - "traefik.http.routers.traefik-dashboard.service=api@internal"
+
       # ---- Router for HS_URL root redirect ----
       - "traefik.http.routers.hs-root-redirect.rule=Host(`${HS_URL}`) && Path(`/`)"
       - "traefik.http.routers.hs-root-redirect.priority=95"
@@ -165,6 +198,12 @@ services:
       - "traefik.http.routers.http-catchall.rule=hostregexp(`{host:.+}`)"
       - "traefik.http.routers.http-catchall.entrypoints=web"
       - "traefik.http.routers.http-catchall.middlewares=redirectToHttps@file"
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--output-document=/dev/null", "http://127.0.0.1:8080/ping"]
       interval: 30s
@@ -179,11 +218,6 @@ services:
         reservations:
           memory: 128M
           cpus: '0.25'
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
 
   ## -- crowdsec agent --
   crowdsec:
@@ -201,7 +235,7 @@ services:
       - /var/log/auth.log:/var/log/host_auth.log:ro
     environment:
       GID: "${GID:-1000}"
-      COLLECTIONS: "crowdsecurity/traefik crowdsecurity/sshd crowdsecurity/linux crowdsecurity/base-http-scenarios crowdsecurity/whitelist-good-actors"
+      COLLECTIONS: "crowdsecurity/traefik crowdsecurity/sshd crowdsecurity/linux crowdsecurity/base-http-scenarios crowdsecurity/whitelist-good-actors crowdsecurity/appsec-virtual-patching crowdsecurity/appsec-generic-rules"
     healthcheck:
       test: ["CMD-SHELL", "cscli lapi status || exit 1"]
       interval: 30s
