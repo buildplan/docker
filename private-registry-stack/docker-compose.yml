@@ -14,7 +14,7 @@ services:
       - registry-net
     environment:
       OTEL_TRACES_EXPORTER: "none"
-      REGISTRY_HTTP_SECRET: ${REGISTRY_HTTP_SECRET} # .env for all the veriables
+      REGISTRY_HTTP_SECRET: ${REGISTRY_HTTP_SECRET}
     restart: unless-stopped
     logging:
       driver: "json-file"
@@ -223,7 +223,7 @@ services:
           cpus: '0.50'
           memory: 512M
 
-# --- CrowdSec Service ---
+  # --- CrowdSec Service ---
   crowdsec:
     image: crowdsecurity/crowdsec:latest
     container_name: crowdsec
@@ -289,19 +289,20 @@ services:
           cpus: '0.25'
           memory: 512M
 
-  # --- NOTIFICATION APP SERVICE ---
+  # --- Notifications Servoce ---
   registry-webhook-receiver:
     image: iamdockin/registry-webhook-receiver:latest
     container_name: registry-webhook-receiver
     restart: unless-stopped
     networks:
       - registry-net
+    depends_on:
+      - registry
     environment:
       - NTFY_SERVER_URL=${NTFY_SERVER_URL}
       - NTFY_TOPIC=${NTFY_TOPIC}
       - NTFY_ACCESS_TOKEN=${NTFY_ACCESS_TOKEN}
       - NTFY_PRIORITY=${NTFY_PRIORITY:-default}
-      - FLASK_ENV=production
     logging:
       driver: "json-file"
       options: { max-size: "5m", max-file: "3" }
