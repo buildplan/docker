@@ -5,6 +5,7 @@ networks:
 
 services:
 
+  # --- traefik proxy ---
   traefik:
     image: docker.io/library/traefik:${TRAEFIK_TAG} # From .env
     container_name: ${COMPOSE_PROJECT_NAME}_traefik
@@ -29,11 +30,13 @@ services:
       - "traefik.http.routers.traefik-dashboard.entrypoints=websecure"
       - "traefik.http.routers.traefik-dashboard.service=api@internal" # Internal Traefik API service
       - "traefik.http.routers.traefik-dashboard.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.traefik-dashboard.middlewares=dashboardAuth@file" # Reference middleware
+      - "traefik.http.routers.traefik-dashboard.middlewares=authentik-forward-auth@file" # authentik auth 
+      # - "traefik.http.routers.traefik-dashboard.middlewares=dashboardAuth@file" # basic-auth middleware
     logging:
       driver: "json-file"
       options: { max-size: "10m", max-file: "3" }
 
+  # --- postgres db ---
   postgresql:
     image: docker.io/library/postgres:${POSTGRES_TAG} # From .env
     container_name: ${COMPOSE_PROJECT_NAME}_postgres
@@ -52,6 +55,7 @@ services:
       driver: "json-file"
       options: { max-size: "10m", max-file: "2" }
 
+  # --- valkey ---
   valkey:
     image: docker.io/valkey/valkey:${VALKEY_TAG} # From .env
     container_name: ${COMPOSE_PROJECT_NAME}_valkey
@@ -65,6 +69,7 @@ services:
       driver: "json-file"
       options: { max-size: "5m", max-file: "2" }
 
+  # --- authentik server ---
   authentik-server:
     image: ghcr.io/goauthentik/server:${AUTHENTIK_TAG} # From .env
     container_name: ${COMPOSE_PROJECT_NAME}_server
@@ -94,9 +99,10 @@ services:
       - "traefik.http.routers.authentik.entrypoints=websecure"
       - "traefik.http.routers.authentik.service=authentik-svc"
       - "traefik.http.routers.authentik.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.authentik.middlewares=defaultSecurityHeaders@file" # Apply security headers
+      - "traefik.http.routers.authentik.middlewares=defaultSecurityHeaders@file,crowdsec@file" # Apply security headers and crowdsec
       - "traefik.http.services.authentik-svc.loadbalancer.server.port=9000" # Authentik's internal HTTP port
 
+  # --- authentik worker ---
   authentik-worker:
     image: ghcr.io/goauthentik/server:${AUTHENTIK_TAG} # From .env
     container_name: ${COMPOSE_PROJECT_NAME}_worker
@@ -121,3 +127,37 @@ services:
     logging:
       driver: "json-file"
       options: { max-size: "10m", max-file: "3" }
+
+  # --- crowdsec ---
+  crowdsec:
+    image: crowdsecurity/crowdsec:${CROWDSEC_TAG}
+    container_name: crowdsec
+    restart: unless-stopped
+    networks:
+      - auth_net
+    ports:
+      - "127.0.0.1:8080:8080"
+    expose:
+      - "8080"
+    environment:
+      TZ: Europe/London
+      COLLECTIONS: crowdsecurity/traefik firix/authentik crowdsecurity/appsec-virtual-patching crowdsecurity/appsec-generic-rules crowdsecurity/linux
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/log/auth.log:/var/log/host_auth.log:ro
+      - /var/log/syslog:/var/log/host_syslog:ro
+      - /var/log/ufw.log:/var/log/host_ufw.log:ro
+      - ./traefik_logs/access.log:/var/log/traefik.log:ro
+      - ./crowdsec/config:/etc/crowdsec:rw
+      - ./crowdsec/data:/var/lib/crowdsec/data:rw
+    cap_add:
+      - DAC_READ_SEARCH
+    logging:
+      driver: "json-file"
+      options: { max-size: "5m", max-file: "3" }
+    healthcheck:
+      test: ["CMD", "cscli", "lapi", "status"]
+      interval: 15s
+      timeout: 10s
+      retries: 4
+      start_period: 30s
