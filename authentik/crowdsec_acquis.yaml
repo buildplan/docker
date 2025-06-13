@@ -1,0 +1,24 @@
+# /authentik/crowdsec/config/acquis.yaml 
+
+filenames:
+  - /var/log/host_auth.log
+  - /var/log/host_syslog
+labels:
+  type: syslog
+---
+filenames:
+  - /var/log/host_ufw.log
+labels:
+  type: ufw
+---
+filenames:
+  - /var/log/traefik.log
+labels:
+  type: traefik
+---
+source: docker
+container_name:
+  - authentik_suite_server
+  - authentik_suite_worker
+labels:
+  type: authentik
