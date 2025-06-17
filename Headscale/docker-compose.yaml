@@ -24,14 +24,10 @@ services:
       # - "alis.headplane.target=headscale"
     deploy:
       resources:
-        limits:
-          cpus: '1.0'
-          memory: 1024M
+        limits: { cpus: '1', memory: 1024M }
     logging:
       driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+      options: { max-size: "5m", max-file: "3" }
 
   ## -- headplane --
   headplane:
@@ -61,15 +57,10 @@ services:
       - "traefik.http.routers.headplane-rtr.middlewares=headplane-addslash@file,corsHeader@file,secureHeaders@file,cspHeader@file,crowdsec-middleware@file,oVPSgeoBlock@file"
     deploy:
       resources:
-        limits:
-          cpus: '0.50'
-          memory: 512M
+        limits: { cpus: '0.25', memory: 512M }
     logging:
       driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
+      options: { max-size: "5m", max-file: "3" }
 
   ## -- headscale-admin --
   headscale-admin:
@@ -90,10 +81,7 @@ services:
       - "traefik.http.routers.headscale-admin-extra-rtr.middlewares=corsHeader@file,crowdsec-middleware@file,oVPSgeoBlock@file,oidcAuth@file"
     logging:
       driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
+      options: { max-size: "5m", max-file: "3" }
 
   ## -- cloudflare-dns-sync --
   cloudflare-dns-sync:
@@ -112,14 +100,10 @@ services:
     # command: ["python", "-c", "import os; import time; print(f'PYTHON TEST OK. MODE IS ({os.environ.get(\"mode\")}) - Timestamp: {time.time()}')"]
     deploy:
       resources:
-        limits:
-          cpus: '0.25'
-          memory: 256M
+        limits: { cpus: '0.25', memory: 256M }
     logging:
       driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+      options: { max-size: "5m", max-file: "3" }
 
   ## -- traefik proxy --
   traefik:
@@ -199,12 +183,6 @@ services:
       - "traefik.http.routers.http-catchall.rule=hostregexp(`{host:.+}`)"
       - "traefik.http.routers.http-catchall.entrypoints=web"
       - "traefik.http.routers.http-catchall.middlewares=redirectToHttps@file"
-
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--output-document=/dev/null", "http://127.0.0.1:8080/ping"]
       interval: 30s
@@ -213,12 +191,10 @@ services:
       start_period: 20s
     deploy:
       resources:
-        limits:
-          memory: 512M
-          cpus: '0.50'
-        reservations:
-          memory: 128M
-          cpus: '0.25'
+        limits: { cpus: '0.50', memory: 512M }
+    logging:
+      driver: "json-file"
+      options: { max-size: "5m", max-file: "3" }
 
   ## -- crowdsec agent --
   crowdsec:
@@ -237,7 +213,7 @@ services:
       - /var/log/auth.log:/var/log/host_auth.log:ro
       - /var/log/ufw.log:/var/log/host_ufw.log:ro
     environment:
-      GID: "${GID:-1000}"
+      GID: "${GID:-1001}"
       COLLECTIONS: "crowdsecurity/traefik crowdsecurity/sshd crowdsecurity/linux crowdsecurity/base-http-scenarios crowdsecurity/whitelist-good-actors crowdsecurity/appsec-virtual-patching crowdsecurity/appsec-generic-rules crowdsecurity/iptables"
     healthcheck:
       test: ["CMD-SHELL", "cscli lapi status || exit 1"]
@@ -247,11 +223,7 @@ services:
       start_period: 15s
     deploy:
       resources:
-        limits:
-          memory: 256M
-          cpus: '0.25'
+        limits: { cpus: '0.25', memory: 512M }
     logging:
       driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+      options: { max-size: "5m", max-file: "3" }
