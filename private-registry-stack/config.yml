@@ -1,3 +1,4 @@
+# ~/private-registry-setup/docker-registry/config.yml
 version: 0.1
 log:
   level: info
@@ -7,14 +8,26 @@ storage:
     rootdirectory: /var/lib/registry
   delete:
     enabled: true
+
 http:
   addr: :5000
-  secret: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx # some log string
+  secret: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  debug:
+    addr: :5001
+    prometheus:
+      enabled: true
+      path: /metrics
 
 notifications:
   endpoints:
     - name: "mycustomntfyreceiver"
       url: "http://registry-webhook-receiver:5001/notify"
       timeout: 5s
-      threshold: 3
+      threshold: 2
       backoff: 10s
+
+health:
+  storagedriver:
+    enabled: true
+    interval: 10s
+    threshold: 3
