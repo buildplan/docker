@@ -5,7 +5,7 @@ networks:
 services:
   # --- registry ---
   registry:
-    image: registry:3.0.0
+    image: registry:${REGISTRY_TAG:-3}
     container_name: registry_service
     volumes:
       - ./docker-registry/data:/var/lib/registry
@@ -18,18 +18,14 @@ services:
     restart: unless-stopped
     logging:
       driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "5"
+      options: { max-size: "5m", max-file: "5" }
     deploy:
       resources:
-        limits:
-          cpus: '0.5'
-          memory: 1G
+        limits: { cpus: '0.5', memory: 1G }
 
   # --- proxy ---
   caddy:
-    image: caddy:2.10.0
+    image: caddy:${CADDY_TAG:-2}
     container_name: caddy
     ports:
       - "80:80"
@@ -51,19 +47,16 @@ services:
       - grafana
     logging:
       driver: "json-file"
-      options:
-        max-size: "5m"
-        max-file: "3"
+      options: { max-size: "5m", max-file: "3" }
     deploy:
       resources:
-        limits:
-          cpus: '0.25'
-          memory: 512M
+        limits: { cpus: '0.25', memory: 512M }
 
   # --- ui ---
   registry-ui:
-    image: joxit/docker-registry-ui:main  # 2.5.7
+    image: joxit/docker-registry-ui:${UI_TAG:-main}  # 2.5.7
     container_name: registry_ui
+    restart: unless-stopped
     networks:
       - registry-net
     depends_on:
@@ -88,21 +81,16 @@ services:
       THEME_FOOTER_BACKGROUND: "#1f2937"
     logging:
       driver: "json-file"
-      options:
-        max-size: "5m"
-        max-file: "3"
-    restart: unless-stopped
+      options: { max-size: "5m", max-file: "3" }
     deploy:
       resources:
-        limits:
-          cpus: '0.25'
-          memory: 256M
+        limits: { cpus: '0.25', memory: 256M }
 
-
-  # --- REGSYNC SERVICE ---
+  # --- regsync ---
   regsync:
-    image: ghcr.io/regclient/regsync:v0.8.3
+    image: ghcr.io/regclient/regsync:${REGSYNC_TAG:-v0.8.3}
     container_name: regsync_service
+    restart: unless-stopped
     command: ["-c", "/config/regsync.yml", "server"]
     volumes:
       - ./regsync.yml:/config/regsync.yml:ro
@@ -111,20 +99,16 @@ services:
       - registry-net
     logging:
       driver: "json-file"
-      options:
-        max-size: "5m"
-        max-file: "3"
-    restart: unless-stopped
+      options: { max-size: "5m", max-file: "3" }
     deploy:
       resources:
-        limits:
-          cpus: '0.50'
-          memory: 256M
+        limits: { cpus: '0.50', memory: 256M }
 
-  # --- REGBOT SERVICE ---
+  # --- regbot ---
   regbot:
-    image: ghcr.io/regclient/regbot:v0.8.3
+    image: ghcr.io/regclient/regbot:${REGBOT_TAG:-v0.8.3}
     container_name: regbot_service
+    restart: unless-stopped
     command: ["-c", "/config/regbot.yml", "server"]
     volumes:
       - ./regbot.yml:/config/regbot.yml:ro
@@ -133,19 +117,14 @@ services:
       - registry-net
     logging:
       driver: "json-file"
-      options:
-        max-size: "5m"
-        max-file: "3"
-    restart: unless-stopped
+      options: { max-size: "5m", max-file: "3" }
     deploy:
       resources:
-        limits:
-          cpus: '0.25'
-          memory: 256M
+        limits: { cpus: '0.25', memory: 256M }
 
-  # --- Portainer Service ---
+  # --- Portainer ---
   portainer:
-    image: portainer/portainer-ce:latest
+    image: portainer/portainer-ce:${PORTAINER_TAG:-latest}
     container_name: portainer
     restart: unless-stopped
     volumes:
@@ -155,18 +134,14 @@ services:
       - registry-net
     logging:
       driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+      options: { max-size: "5m", max-file: "3" }
     deploy:
       resources:
-        limits:
-          cpus: '0.50'
-          memory: 256M
+        limits: { cpus: '0.25', memory: 256M }
 
-  # --- Prometheus Service ---
+  # --- Prometheus ---
   prometheus:
-    image: prom/prometheus:v3.4.1
+    image: prom/prometheus:${PROMETHEUS_TAG:-v3.4.1}
     container_name: prometheus
     restart: unless-stopped
     volumes:
@@ -185,18 +160,14 @@ services:
       - registry-net
     logging:
       driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+      options: { max-size: "10m", max-file: "5" }
     deploy:
       resources:
-        limits:
-          cpus: '0.50'
-          memory: 512M
+        limits: { cpus: '0.50', memory: 512M }
 
-  # --- Grafana Service ---
+  # --- Grafana ---
   grafana:
-    image: grafana/grafana:12.0.1
+    image: grafana/grafana:${GRAFANA_TAG:-12.0.1}
     container_name: grafana
     restart: unless-stopped
     # ports:
@@ -214,18 +185,14 @@ services:
       - registry-net
     logging:
       driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+      options: { max-size: "10m", max-file: "3" }
     deploy:
       resources:
-        limits:
-          cpus: '0.50'
-          memory: 512M
+        limits: { cpus: '0.50', memory: 512M }
 
-  # --- CrowdSec Service ---
+  # --- CrowdSec ---
   crowdsec:
-    image: crowdsecurity/crowdsec:latest
+    image: crowdsecurity/crowdsec:${CROWDSEC_TAG:-latest}
     container_name: crowdsec
     restart: unless-stopped
     depends_on:
@@ -243,25 +210,21 @@ services:
       - GID=$(id -g)
     ports:
       - "127.0.0.1:8080:8080"
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-    deploy:
-      resources:
-        limits:
-          cpus: '0.50'
-          memory: 512M
     healthcheck:
       test: ["CMD", "cscli", "capi", "status"]
       interval: 1m
       timeout: 15s
       retries: 3
+    logging:
+      driver: "json-file"
+      options: { max-size: "5m", max-file: "3" }
+    deploy:
+      resources:
+        limits: { cpus: '0.50', memory: 512M }
 
-  # --- cAdvisor Service ---
+  # --- cAdvisor ---
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.52.1
+    image: gcr.io/cadvisor/cadvisor:${CADVISOR_TAG:-v0.52.1}
     container_name: cadvisor
     privileged: true
     devices:
@@ -280,18 +243,14 @@ services:
     restart: unless-stopped
     logging:
       driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+      options: { max-size: "10m", max-file: "3" }
     deploy:
       resources:
-        limits:
-          cpus: '0.25'
-          memory: 512M
+        limits: { cpus: '0.25', memory: 512M }
 
-  # --- Notifications Servoce ---
+  # --- notifications ---
   registry-webhook-receiver:
-    image: iamdockin/registry-webhook-receiver:latest
+    image: iamdockin/registry-webhook-receiver:${NOTIFY_TAG:-latest}
     container_name: registry-webhook-receiver
     restart: unless-stopped
     networks:
