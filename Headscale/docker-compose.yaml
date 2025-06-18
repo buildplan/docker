@@ -2,7 +2,7 @@
 services:
   ## -- headscale --
   headscale:
-    image: headscale/headscale:0.26.1
+    image: headscale/headscale:${HEADSCALE_TAG:-0.26.1}
     container_name: headscale
     restart: unless-stopped
     depends_on:
@@ -31,7 +31,7 @@ services:
 
   ## -- headplane --
   headplane:
-    image: ghcr.io/tale/headplane:0.6.0
+    image: ghcr.io/tale/headplane:${HEADPLANE_TAG:-0.6.0}
     container_name: headplane
     restart: unless-stopped
     environment:
@@ -64,7 +64,7 @@ services:
 
   ## -- headscale-admin --
   headscale-admin:
-    image: goodieshq/headscale-admin:0.25.6
+    image: goodieshq/headscale-admin:${HSADMIN_TAG:-0.25.6}
     container_name: headscale-admin
     restart: unless-stopped
     depends_on:
@@ -85,7 +85,7 @@ services:
 
   ## -- cloudflare-dns-sync --
   cloudflare-dns-sync:
-    image: iamdockin/hs-cf-dns-sync:0.0.3
+    image: iamdockin/hs-cf-dns-sync:${CFDNS_TAG:-0.0.3}
     container_name: cloudflare-dns-sync
     labels:
       - "traefik.enable=false"
@@ -107,7 +107,7 @@ services:
 
   ## -- traefik proxy --
   traefik:
-    image: traefik:v3.4.1
+    image: traefik:${TRAEFIK_TAG:-v3.4.1}
     restart: unless-stopped
     container_name: traefik
     depends_on:
@@ -198,7 +198,7 @@ services:
 
   ## -- crowdsec agent --
   crowdsec:
-    image: crowdsecurity/crowdsec:latest
+    image: crowdsecurity/crowdsec:${CROWDSEC_TAG:-latest}
     container_name: crowdsec
     restart: unless-stopped
     expose:
