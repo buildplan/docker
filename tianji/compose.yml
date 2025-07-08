@@ -7,17 +7,26 @@ services:
     image: moonrailgun/tianji
     container_name: tianji
     ports:
-      - "127.0.0.1:12345:12345"
-      - "10.0.0.0:12345:12345" # tailscle ipv4
+      - "127.0.0.1:12345:12345" # exposed on loopback and proxy via newt/pangolin
+      - "10.10.0.11:12345:12345" # tailscale
     networks:
       - tianji-net
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@tianji-db:5432/${POSTGRES_DB} # create .env 
-      JWT_SECRET: ${JWT_SECRET}
-      CUSTOM_TRACKER_SCRIPT_NAME: ${CUSTOM_TRACKER_SCRIPT_NAME} # .env
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@tianji-db:5432/${POSTGRES_DB} # .env file
+      JWT_SECRET: ${JWT_SECRET} # .env file
       ALLOW_REGISTER: "false"
       ALLOW_OPENAPI: "false"
+      DISABLE_ACCOUNT: "true"
+      AUTH_CUSTOM_ID: ${AUTH_CUSTOM_ID} # .env file
+      AUTH_CUSTOM_SECRET: ${AUTH_CUSTOM_SECRET} # .env file
+      AUTH_CUSTOM_NAME: ${AUTH_CUSTOM_NAME} # .env file
+      AUTH_CUSTOM_TYPE: ${AUTH_CUSTOM_TYPE} # .env file
+      AUTH_CUSTOM_ISSUER: ${AUTH_CUSTOM_ISSUER} # .env file
+      AUTH_RESTRICT_EMAIL: ${AUTH_RESTRICT_EMAIL} # .env file
       DISABLE_ANONYMOUS_TELEMETRY: "true"
+      CUSTOM_TRACKER_SCRIPT_NAME: ${CUSTOM_TRACKER_SCRIPT_NAME} # .env file
+      EMAIL_SERVER: ${EMAIL_SERVER} # .env file
+      EMAIL_FROM: ${EMAIL_FROM} # .env file
     depends_on:
       tianji-db:
         condition: service_healthy
@@ -32,14 +41,14 @@ services:
     networks:
       - tianji-net
     environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB} # .env file
+      POSTGRES_USER: ${POSTGRES_USER} # .env file
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD} # .env file
     volumes:
-      - ./tianji_db:/var/lib/postgresql/data #create tianji_db dir.
+      - ./tianji_db:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"] # .env file
       interval: 5s
       timeout: 5s
       retries: 5
