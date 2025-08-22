@@ -6,14 +6,15 @@
 3. [Directory Structure](#directory-structure)
 4. [Services & Components](#services--components)
 5. [Configuration Files](#configuration-files)
-6. [Automation Scripts](#automation-scripts)
-7. [Security & Credentials](#security--credentials)
-8. [Monitoring & Observability](#monitoring--observability)
-9. [Backup & Recovery](#backup--recovery)
-10. [Maintenance Procedures](#maintenance-procedures)
-11. [Troubleshooting](#troubleshooting)
-12. [Disaster Recovery](#disaster-recovery)
-13. [References & Resources](#references--resources)
+6. [Reverse Proxy Configuration](#reverse-proxy-configuration)
+7. [Automation Scripts](#automation-scripts)
+8. [Security & Credentials](#security--credentials)
+9. [Monitoring & Observability](#monitoring--observability)
+10. [Backup & Recovery](#backup--recovery)
+11. [Maintenance Procedures](#maintenance-procedures)
+12. [Troubleshooting](#troubleshooting)
+13. [Disaster Recovery](#disaster-recovery)
+14. [References & Resources](#references--resources)
 
 ---
 
@@ -298,6 +299,92 @@ Following [regsync best practices](https://regclient.org/usage/regsync/), the co
 ```
 
 ---
+
+## Reverse Proxy Configuration
+
+Your infrastructure uses **Caddy** as the reverse proxy and TLS terminator, with built-in CrowdSec support for application-layer protection. You maintain a custom Caddy image in your GitHub repository:
+
+- **Custom Caddy Image**: https://github.com/buildplan/cs-caddy
+
+This image is based on the official Caddy image and includes the [caddy-crowdsec bouncer plugin](https://github.com/crowdsecurity/cs-caddy).
+
+### Caddyfile Breakdown
+
+```text
+# --- Global options ---
+{
+  email letse@my_domain.tld
+  admin :2019
+  metrics
+
+  log {
+    output file /var/log/caddy/access.log {
+      roll_size 10mb
+      roll_keep 5
+      roll_keep_for 360h
+    }
+    format json
+    level INFO
+  }
+
+  crowdsec {
+    api_url    http://crowdsec:8080
+    api_key    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    ticker_interval 15s
+    appsec_url http://crowdsec:7422
+  }
+}
+
+# --- Registry API Block ---
+registry.my_domain.tld {
+  route {
+    basic_auth {
+      user     $2a$14$...   # Pull password hash
+      serve_push $2a$16$... # Push password hash
+    }
+
+    header {
+      Strict-Transport-Security "max-age=31536000;"
+      X-Frame-Options        "DENY"
+      X-Content-Type-Options "nosniff"
+      ...
+    }
+
+    reverse_proxy registry:5000 {
+      transport http {
+        dial_timeout           5s
+        response_header_timeout 5m
+      }
+    }
+  }
+}
+
+# Additional blocks for UI, Portainer, Prometheus, Grafana, etc.
+```
+
+**Key Points**:
+- **Global Options**: TLS cert management, metrics endpoint, admin API
+- **Logging**: JSON logs with file rotation
+- **CrowdSec Integration**: Built-in plugin for request filtering
+- **Basic Auth**: Protects registry endpoints with bcrypt hashes
+- **Security Headers**: HSTS, CSP, X-Frame-Options, and more
+- **Reverse Proxy**: Routes subdomains to internal service ports
+
+### Subdomain Routing
+- `registry.my_domain.tld` → Docker Registry API
+- `ui.registry.my_domain.tld` → Registry UI
+- `port.registry.my_domain.tld` → Portainer
+- `prom.registry.my_domain.tld` → Prometheus
+- `stats.registry.my_domain.tld` → Grafana (OIDC)
+
+### Best Practices
+- Use **strong bcrypt** hashed credentials for all protected endpoints
+- Configure **CSP** and other headers per [OWASP recommendations](https://owl.aspnetboilerplate.com/mvc6/)
+- Enable **CrowdSec** for dynamic IP banning and application security
+- Keep TLS configs up to date following [Let's Encrypt best practices](https://letsencrypt.org/docs/)
+
+---
+
 
 ## Automation Scripts
 
