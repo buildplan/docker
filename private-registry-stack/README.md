@@ -517,27 +517,102 @@ All sensitive credentials are stored in the `secrets/` directory with proper fil
 ## Monitoring & Observability
 
 ### Metrics Collection
-- **Registry Metrics**: Native Prometheus endpoint (`/metrics`)
-- **Container Metrics**: cAdvisor collection for all services
-- **System Metrics**: Host-level monitoring via cAdvisor
-- **Application Metrics**: Service-specific exporters
+- **Registry Metrics**: Native Prometheus endpoint (`/debug/metrics` on port 5001)
+- **Container Metrics**: cAdvisor collection for all services with resource usage monitoring
+- **System Metrics**: Host-level monitoring via cAdvisor (CPU, memory, network, disk I/O)
+- **Security Metrics**: CrowdSec Prometheus endpoint (`/metrics` on port 6060)
+- **Proxy Metrics**: Caddy metrics endpoint for HTTP traffic analysis
+- **Application Metrics**: Service-specific exporters for detailed performance insights
+
+### Security Monitoring (CrowdSec)
+- **Threat Detection**: Real-time analysis of access logs and system events
+- **IP Banning**: Automatic blocking of malicious IPs with decision tracking
+- **Scenario Monitoring**: Tracking of security scenario triggers and overflows
+- **Parser Analytics**: Success/failure rates of log parsing by source
+- **API Metrics**: Local API performance and bouncer request statistics
+
+**Key CrowdSec Metrics**:
+- `cs_active_decisions`: Currently active bans and security decisions
+- `cs_alerts`: Total security alerts triggered by scenarios
+- `cs_bucket_overflowed_total`: Security scenarios that have triggered actions
+- `cs_lapi_decisions_ok_total`: Successful bouncer API requests
+- `cs_node_hits_total`: Log processing statistics by parser and source
+- `cs_info`: CrowdSec version and configuration information
 
 ### Notification Channels
 1. **ntfy**: Primary notification system
-   - Registry events (push/pull/delete)
-   - Sync status updates
-   - System alerts and failures
+   - Registry events (push/pull/delete operations)
+   - Regsync status updates and sync completion
+   - System alerts and service failures
+   - Garbage collection reports
+   - Registry change detection notifications
    
 2. **Gotify**: Secondary notification system
-   - Backup status reports
-   - Configuration changes
-   - Manual operations
+   - Backup status reports with detailed logs
+   - Configuration changes and manual operations
+   - Regsync configuration management notifications
+
+3. **Registry Webhooks**: Built-in event notifications
+   - Image push/pull events with metadata
+   - Repository creation and deletion
+   - Manifest uploads and tag operations
 
 ### Dashboard Access
-- **Grafana**: `https://registry.my_domain.tld/grafana`
-- **Prometheus**: `https://registry.my_domain.tld/prometheus`
-- **Registry UI**: `https://registry.my_domain.tld`
-- **Portainer**: Internal access for container management
+- **Grafana (Monitoring)**: `stats.registry.my_domain.tld`
+  - Registry performance dashboards
+  - Container resource monitoring
+  - CrowdSec security insights and threat analysis
+  - System performance metrics and alerting
+- **Prometheus (Metrics)**: `prom.registry.my_domain.tld`
+  - Raw metrics access and PromQL queries
+  - Target status and scraping health
+  - Alert rule configuration and testing
+- **Registry UI**: `ui.registry.my_domain.tld`
+  - Image repository browsing
+  - Tag management and deletion
+  - Storage usage visualization
+- **Portainer (Container Management)**: `port.registry.my_domain.tld`
+  - Container lifecycle management
+  - Log streaming and debugging
+  - Resource usage monitoring
+
+### Grafana Dashboards
+1. **Registry Performance Dashboard**
+   - Image pull/push metrics and response times
+   - Storage usage and growth trends
+   - Cache hit rates and Redis performance
+
+2. **Container Monitoring Dashboard**
+   - Resource usage by service (CPU, memory, network)
+   - Container health status and restart counts
+   - Docker daemon metrics and performance
+
+3. **CrowdSec Security Dashboard** (Dashboard IDs: 19011, 19012)
+   - **CrowdSec Insights**: High-level security overview
+     - Active bans and security decisions
+     - Threat geography and attack patterns  
+     - Scenario trigger rates and effectiveness
+   - **CrowdSec Details**: Detailed engine metrics
+     - Log parsing success/failure rates by source
+     - API performance and bouncer statistics
+     - Parser hit counts and error analysis
+
+4. **System Overview Dashboard**
+   - Host system metrics and resource utilization
+   - Network traffic patterns and bandwidth usage
+   - Disk I/O performance and storage capacity
+
+### Alerting Configuration
+- **High Priority Alerts**: Service failures, security breaches, backup failures
+- **Medium Priority Alerts**: Resource threshold warnings, sync failures
+- **Low Priority Alerts**: Maintenance notifications, configuration changes
+- **Alert Routing**: Critical alerts via both ntfy and Gotify for redundancy
+
+### Monitoring Best Practices
+- **Metrics Retention**: Prometheus configured with appropriate retention policies
+- **Dashboard Refresh**: Auto-refresh intervals optimized for real-time monitoring
+- **Alert Thresholds**: Tuned based on baseline performance metrics
+- **Security Monitoring**: CrowdSec scenarios regularly updated with threat intelligence
 
 ---
 
@@ -790,6 +865,7 @@ docker compose exec redis redis-cli info
 ### Monitoring & Observability
 - **Docker Monitoring with Prometheus**: [https://last9.io/blog/docker-monitoring-with-prometheus-a-step-by-step-guide/](https://last9.io/blog/docker-monitoring-with-prometheus-a-step-by-Step-guide/)
 - **Grafana Docker Compose Setup**: [https://grafana.com/docs/grafana-cloud/send-data/metrics/metrics-prometheus/prometheus-config-examples/docker-compose-linux/](https://grafana.com/docs/grafana-cloud/send-data/metrics/metrics-prometheus/prometheus-config-examples/docker-compose-linux/)
+- **CorwdSec Dashboard with with Prometheus/Grafana**: [https://docs.crowdsec.net/docs/observability/prometheus/](https://docs.crowdsec.net/docs/observability/prometheus/)
 
 ### Proxy and Load Balancing
 - **Nginx Authentication Proxy**: [https://distribution.github.io/distribution/recipes/nginx/](https://distribution.github.io/distribution/recipes/nginx/)
