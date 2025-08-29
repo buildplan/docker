@@ -68,7 +68,7 @@ send_ntfy() {
 # --- Main Backup Logic ---
 log_message "--------------------"
 log_message "Registry Backup started on ${HOSTNAME}"
-send_ntfy "[Registry Backup] Start" "Backup process started on ${HOSTNAME}" "3" "gear" || log_message "Warning: Failed to send ntfy start notification."
+send_ntfy "[Registry Backup] Start" "Backup process started on ${HOSTNAME}" "2" "gear" || log_message "Warning: Failed to send ntfy start notification."
 
 # 1. SSH Connection Test
 log_message "Testing SSH connection to backup host..."
