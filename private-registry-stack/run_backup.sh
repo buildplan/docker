@@ -1,103 +1,135 @@
 #!/bin/bash
 
+# This script uses rsync to backup registry directory to Hetzner Storage Box.
+
+set -euo pipefail
+
 # --- Configuration ---
 # Path to the directory backing up
 SOURCE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
 HOSTNAME=$(hostname -s)
+
 # Secrets and Logs
 SECRETS_DIR="${SOURCE_DIR}/secrets"
 LOG_DIR="${SOURCE_DIR}/logs"
+LOG_FILE="${LOG_DIR}/backup.log"
+
 # Backup destination details for Hetzner Storage Box
 HETZNER_USER=$(<"${SECRETS_DIR}/hetzner_user")
 HETZNER_HOST=$(<"${SECRETS_DIR}/hetzner_host")
-HETZNER_TARGET_DIR="/home/private-registry"
+HETZNER_TARGET_DIR=$(<"${SECRETS_DIR}/hetzner_target")
 SSH_PORT="23"
-if [[ -n "$SUDO_USER" ]]; then
+
+# Determine the correct home directory whether running with sudo or not
+if [[ -n "${SUDO_USER-}" ]]; then
   EFFECTIVE_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
 else
   EFFECTIVE_HOME="${HOME}"
 fi
 SSH_KEY_PATH="${EFFECTIVE_HOME}/.ssh/id_hetzner_backup"
+
 # Docker Compose file path
 COMPOSE_FILE="${SOURCE_DIR}/docker-compose.yml"
 REGISTRY_SERVICE="registry"
-# Logs
-LOG_FILE="${LOG_DIR}/backup.log"
-# Gotify details
-GOTIFY_TOKEN_FILE="${SECRETS_DIR}/gotify_token"
-GOTIFY_URL=$(<"${SECRETS_DIR}/gotify_url")
+
+# ntfy Notification Details
+NTFY_URL=$(<"${SECRETS_DIR}/ntfy_url")
+NTFY_TOPIC=$(<"${SECRETS_DIR}/ntfy_topic")
+NTFY_TOKEN_FILE="${SECRETS_DIR}/ntfy_token"
 # --- End Configuration ---
 
 # Re-run the script with sudo if not already root
 if [[ $EUID -ne 0 ]]; then
   echo "Re-running script as root using sudo..."
-  exec sudo "$0" "$@"
+  exec sudo -E "$0" "$@"
 fi
 
 # Ensure log directory exists
 mkdir -p "${LOG_DIR}"
 
-# Function to send Gotify message
-send_gotify() {
-  local title="$1"; local message="$2"; local priority="$3"
-  if [[ ! -f "${GOTIFY_TOKEN_FILE}" ]]; then echo "Error: Gotify token file not found" >&2; return 1; fi
-  local token=$(cat "${GOTIFY_TOKEN_FILE}")
-  if [[ -z "$token" ]]; then echo "Error: Gotify token file is empty" >&2; return 1; fi
-  curl -sf -X POST "${GOTIFY_URL}/message?token=${token}" -F "title=${title}" -F "message=${message}" -F "priority=${priority}"
+# --- Helper Functions ---
+log_message() {
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "${LOG_FILE}"
+}
+
+send_ntfy() {
+  local title="$1"; local message="$2"; local priority="$3"; local tags="$4"
+  if [[ ! -f "${NTFY_TOKEN_FILE}" ]]; then
+    log_message "Error: ntfy token file not found at ${NTFY_TOKEN_FILE}"; return 1;
+  fi
+  local token; token=$(cat "${NTFY_TOKEN_FILE}")
+  if [[ -z "$token" ]]; then
+    log_message "Error: ntfy token file is empty"; return 1;
+  fi
+  curl -s -f -H "Authorization: Bearer ${token}" -H "Title: ${title}" -H "Priority: ${priority}" -H "Tags: ${tags}" -d "${message}" "${NTFY_URL}/${NTFY_TOPIC}" > /dev/null
   return $?
 }
 
 # --- Main Backup Logic ---
-echo "--------------------" | tee -a "${LOG_FILE}"
-echo "Registry Backup started at $(date)" | tee -a "${LOG_FILE}"
+log_message "--------------------"
+log_message "Registry Backup started on ${HOSTNAME}"
+send_ntfy "[Registry Backup] Start" "Backup process started on ${HOSTNAME}" "3" "gear" || log_message "Warning: Failed to send ntfy start notification."
 
-send_gotify "[Registry Backup] Start" "Registry backup process started on ${HOSTNAME}" "3" || echo "Warning: Failed to send Gotify start notification." >&2
-
-# 1. Stop Registry Service for consistency
-echo "Stopping registry service (${REGISTRY_SERVICE})..." | tee -a "${LOG_FILE}"
-docker compose -f "${COMPOSE_FILE}" stop "${REGISTRY_SERVICE}"
-stop_exit_code=$?
-if [ $stop_exit_code -ne 0 ]; then
-  echo "Error: Failed to stop registry service. Aborting backup." | tee -a "${LOG_FILE}"
-  send_gotify "[Registry Backup] FAILED!" "Failed to stop registry service (${REGISTRY_SERVICE}). Backup aborted." "8"
+# 1. SSH Connection Test
+log_message "Testing SSH connection to backup host..."
+if ! ssh -p "${SSH_PORT}" -i "${SSH_KEY_PATH}" -o ConnectTimeout=10 -o BatchMode=yes "${HETZNER_USER}@${HETZNER_HOST}" exit; then
+  log_message "Error: Cannot connect to backup host. Aborting."
+  send_ntfy "[Registry Backup] FAILED" "Could not connect to backup host ${HETZNER_HOST}. Backup aborted." "high" "x"
   exit 1
 fi
-echo "Registry service stopped." | tee -a "${LOG_FILE}"
+log_message "SSH connection successful."
 
-# 2. Perform rsync
-# Use sudo because source directory contains root-owned files from volumes
-echo "Starting rsync to ${HETZNER_USER}@${HETZNER_HOST}:${HETZNER_TARGET_DIR}..." | tee -a "${LOG_FILE}"
-sudo /usr/bin/rsync -avz --delete \
-     --log-file="${LOG_FILE}" \
-     -e "ssh -p ${SSH_PORT} -i ${SSH_KEY_PATH}" \
-     "${SOURCE_DIR}/" \
-     "${HETZNER_USER}@${HETZNER_HOST}:${HETZNER_TARGET_DIR}/"
-rsync_exit_code=$?
+# 2. Stop Registry Service
+log_message "Stopping registry service (${REGISTRY_SERVICE})..."
+docker compose -f "${COMPOSE_FILE}" stop "${REGISTRY_SERVICE}"
+log_message "Registry service stopped."
 
-# 3. Restart Registry Service (regardless of rsync outcome)
-echo "Starting registry service (${REGISTRY_SERVICE})..." | tee -a "${LOG_FILE}"
+# 3. Perform rsync
+log_message "Starting rsync to ${HETZNER_USER}@${HETZNER_HOST}:${HETZNER_TARGET_DIR}..."
+rsync_exit_code=0
+/usr/bin/rsync -avz --delete --log-file="${LOG_FILE}" -e "ssh -p ${SSH_PORT} -i ${SSH_KEY_PATH}" "${SOURCE_DIR}/" "${HETZNER_USER}@${HETZNER_HOST}:${HETZNER_TARGET_DIR}/" || rsync_exit_code=$?
+
+# 4. Restart Registry Service
+log_message "Starting registry service (${REGISTRY_SERVICE})..."
 docker compose -f "${COMPOSE_FILE}" start "${REGISTRY_SERVICE}"
-start_exit_code=$?
-if [ $start_exit_code -ne 0 ]; then
-    echo "Error: Failed to restart registry service after backup attempt." | tee -a "${LOG_FILE}"
-    send_gotify "[Registry Backup] WARNING" "Rsync finished (Code ${rsync_exit_code}) but FAILED to restart registry service (${REGISTRY_SERVICE})!" "7"
-fi
-echo "Registry service start command issued." | tee -a "${LOG_FILE}"
+log_message "Registry service start command issued."
 
-# 4. Send Final Notification
-if [ $rsync_exit_code -eq 0 ]; then
-  echo "Rsync finished successfully." | tee -a "${LOG_FILE}"
-  # Include tail of log file in success message
-  rsync_tail=$(tail -n 10 "${LOG_FILE}")
-  send_gotify "[Registry Backup] Success" "Registry backup finished successfully to Hetzner.\n\nRsync Log Tail:\n${rsync_tail}" "5" || echo "Warning: Failed to send Gotify success notification." >&2
+log_message "Waiting 5 seconds for the service to stabilize..."
+sleep 5
+
+# 5. Final Status Check and Notification
+log_message "Performing robust check on service status..."
+service_is_running=false # Default to false
+
+# Get the container ID for the specific service.
+CONTAINER_ID=$(docker compose -f "${COMPOSE_FILE}" ps -q "${REGISTRY_SERVICE}" || true)
+
+# Check if the container ID was found and then inspect its state
+if [[ -n "$CONTAINER_ID" ]]; then
+    STATUS=$(docker inspect --format='{{.State.Status}}' "$CONTAINER_ID")
+    log_message "Service '${REGISTRY_SERVICE}' current state is: ${STATUS}"
+
+    if [[ "$STATUS" == "running" ]]; then
+        service_is_running=true
+    fi
 else
-  echo "Rsync FAILED! Exit code: ${rsync_exit_code}" | tee -a "${LOG_FILE}"
-  # Send failure notification with tail of log
-  error_msg=$(tail -n 10 "${LOG_FILE}")
-  send_gotify "[Registry Backup] FAILED!" "Registry backup FAILED! Rsync Exit code: ${rsync_exit_code}\n\nLog Tail:\n${error_msg}" "8" || echo "Warning: Failed to send Gotify failure notification." >&2
+    log_message "Could not find a container for service '${REGISTRY_SERVICE}'."
 fi
 
-echo "Registry Backup finished at $(date)" | tee -a "${LOG_FILE}"
-echo "--------------------" | tee -a "${LOG_FILE}"
+# Send the final notification based on the results
+if [ $rsync_exit_code -eq 0 ] && [ "$service_is_running" = true ]; then
+  log_message "Rsync finished successfully and service restarted."
+  send_ntfy "[Registry Backup] Success" "Backup finished successfully and service is running on ${HOSTNAME}." "2" "tada"
+elif [ $rsync_exit_code -eq 0 ] && [ "$service_is_running" = false ]; then
+  log_message "Error: Rsync successful, but FAILED to restart registry service."
+  send_ntfy "[Registry Backup] WARNING" "Backup was successful, but the registry service FAILED to restart on ${HOSTNAME}!" "high" "warning"
+else
+  log_message "Rsync FAILED! Exit code: ${rsync_exit_code}"
+  error_msg=$(tail -n 10 "${LOG_FILE}")
+  send_ntfy "[Registry Backup] FAILED!" "Backup FAILED on ${HOSTNAME} with Rsync Exit code: ${rsync_exit_code}\n\nLog Tail:\n${error_msg}" "high" "x"
+fi
+
+log_message "Registry Backup finished."
+log_message "--------------------"
 
 exit $rsync_exit_code
