@@ -34,7 +34,7 @@ SSH_KEY_PATH="${EFFECTIVE_HOME}/.ssh/id_run_backup"
 COMPOSE_FILE="${SOURCE_DIR}/docker-compose.yml"
 REGISTRY_SERVICE="registry"
 
-# ntfy Notification Details
+# ntfy Details
 NTFY_URL=$(<"${SECRETS_DIR}/ntfy_url")
 NTFY_TOPIC=$(<"${SECRETS_DIR}/ntfy_topic")
 NTFY_TOKEN=$(<"${SECRETS_DIR}/ntfy_token")
@@ -126,7 +126,7 @@ else
     log_message "Rsync finished successfully. Waiting 5 seconds for service to stabilize..."
     sleep 5
     log_message "Checking registry service status..."
-    service_is_running=false # Default to false
+    service_is_running=false
     container_id=$(docker compose -f "${COMPOSE_FILE}" ps -q "${REGISTRY_SERVICE}" || true)
     if [[ -n "$container_id" ]]; then
         status=$(docker inspect --format='{{.State.Status}}' "$container_id")
