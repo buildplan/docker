@@ -5,15 +5,16 @@
 set -euo pipefail
 
 # --- Configuration ---
+HOSTNAME=$(hostname -s)
+
 # Path to the directory backing up
 SOURCE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
-HOSTNAME=$(hostname -s)
 
 # Secrets, Logs and Lock
 SECRETS_DIR="${SOURCE_DIR}/secrets"
 LOG_DIR="${SOURCE_DIR}/logs"
-LOG_FILE="${LOG_DIR}/backup.log"
-LOCK_FILE="${LOG_DIR}/registry_backup.lock"
+LOG_FILE="${LOG_DIR}/run_backup.log"
+LOCK_FILE="${LOG_DIR}/run_backup.lock"
 
 # Backup destination details for Hetzner Storage Box
 HETZNER_USER=$(<"${SECRETS_DIR}/hetzner_user")
@@ -27,7 +28,7 @@ if [[ -n "${SUDO_USER-}" ]]; then
 else
   EFFECTIVE_HOME="${HOME}"
 fi
-SSH_KEY_PATH="${EFFECTIVE_HOME}/.ssh/id_hetzner_backup"
+SSH_KEY_PATH="${EFFECTIVE_HOME}/.ssh/id_run_backup"
 
 # Docker Compose file path
 COMPOSE_FILE="${SOURCE_DIR}/docker-compose.yml"
@@ -125,7 +126,7 @@ else
     log_message "Rsync finished successfully. Waiting 5 seconds for service to stabilize..."
     sleep 5
     log_message "Checking registry service status..."
-    service_is_running=false
+    service_is_running=false # Default to false
     container_id=$(docker compose -f "${COMPOSE_FILE}" ps -q "${REGISTRY_SERVICE}" || true)
     if [[ -n "$container_id" ]]; then
         status=$(docker inspect --format='{{.State.Status}}' "$container_id")
