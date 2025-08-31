@@ -72,6 +72,7 @@ format_diff_changes() {
     local removed_repos=()
     local updated_repos=()
     local updated_details=""
+    local repo
     for repo in "${changed_repos[@]}"; do
         [[ -z "$repo" ]] && continue
         if echo "$added_lines" | grep -q "^${repo}:" && ! echo "$removed_lines" | grep -q "^${repo}:"; then
