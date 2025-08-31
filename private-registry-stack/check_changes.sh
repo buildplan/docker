@@ -25,12 +25,8 @@ log() {
 send_ntfy() {
     local title="$1" message="$2" priority="$3" tags="$4"
     local auth_header=()
-    if [[ -f "${NTFY_TOKEN}" ]]; then
-        local token
-        read -r token < "${NTFY_TOKEN}"
-        if [[ -n "$token" ]]; then
-            auth_header=(-H "Authorization: Bearer ${token}")
-        fi
+    if [[ -n "${NTFY_TOKEN}" ]]; then
+        auth_header=(-H "Authorization: Bearer ${NTFY_TOKEN}")
     fi
     curl -sf --connect-timeout 5 --max-time 10 \
         "${auth_header[@]}" \
