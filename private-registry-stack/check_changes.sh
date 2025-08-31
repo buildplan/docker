@@ -64,8 +64,10 @@ format_diff_changes() {
     added_lines=$(echo "$diff_output" | grep '^>' | sed 's/> //')
     local removed_lines
     removed_lines=$(echo "$diff_output" | grep '^<' | sed 's/< //')
+    local changed_repos_list
+    changed_repos_list=$( (echo "$added_lines"; echo "$removed_lines") | grep ':' | sed 's/:.*//' | sort -u)
     local changed_repos=()
-    readarray -t changed_repos < <((echo "$added_lines"; echo "$removed_lines") | grep ':' | sed 's/:.*//' | sort -u)
+    readarray -t changed_repos < <(echo "$changed_repos_list")
     local new_repos=()
     local removed_repos=()
     local updated_repos=()
