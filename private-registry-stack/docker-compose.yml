@@ -6,7 +6,7 @@ services:
   # --- registry ---
   registry:
     image: registry:${REGISTRY_TAG:-3}
-    container_name: registry_service
+    container_name: registry
     volumes:
       - ./docker-registry/data:/var/lib/registry
       - ./docker-registry/config.yml:/etc/distribution/config.yml:ro
@@ -16,12 +16,14 @@ services:
       OTEL_TRACES_EXPORTER: "none"
       REGISTRY_HTTP_SECRET: ${REGISTRY_HTTP_SECRET}
     restart: unless-stopped
+    depends_on:
+      - redis
     logging:
       driver: "json-file"
       options: { max-size: "5m", max-file: "5" }
     deploy:
       resources:
-        limits: { cpus: '0.5', memory: 1G }
+        limits: { cpus: '1.5', memory: 2G }
 
   # --- proxy ---
   caddy:
@@ -42,7 +44,6 @@ services:
     depends_on:
       - registry
       - registry-ui
-      - portainer
       - prometheus
       - grafana
     logging:
@@ -76,7 +77,7 @@ services:
   # --- ui ---
   registry-ui:
     image: joxit/docker-registry-ui:${UI_TAG:-main}  # 2.5.7
-    container_name: registry_ui
+    container_name: registry-ui
     restart: unless-stopped
     networks:
       - registry-net
@@ -110,7 +111,7 @@ services:
   # --- regsync ---
   regsync:
     image: ghcr.io/regclient/regsync:${REGCLIENT_TAG:-latest}
-    container_name: regsync_service
+    container_name: regsync
     restart: unless-stopped
     command: ["-c", "/config/regsync.yml", "server"]
     volumes:
@@ -123,34 +124,17 @@ services:
       options: { max-size: "5m", max-file: "3" }
     deploy:
       resources:
-        limits: { cpus: '0.50', memory: 256M }
+        limits: { cpus: '0.50', memory: 512M }
 
   # --- regbot ---
   regbot:
     image: ghcr.io/regclient/regbot:${REGCLIENT_TAG:-latest}
-    container_name: regbot_service
+    container_name: regbot
     restart: unless-stopped
     command: ["-c", "/config/regbot.yml", "server"]
     volumes:
       - ./regbot.yml:/config/regbot.yml:ro
       - ./secrets:/secrets:ro
-    networks:
-      - registry-net
-    logging:
-      driver: "json-file"
-      options: { max-size: "5m", max-file: "3" }
-    deploy:
-      resources:
-        limits: { cpus: '0.25', memory: 256M }
-
-  # --- portainer ---
-  portainer:
-    image: portainer/portainer-ce:${PORTAINER_TAG:-latest}
-    container_name: portainer
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./portainer_data:/data
     networks:
       - registry-net
     logging:
@@ -168,6 +152,8 @@ services:
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus/prometheus_data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
@@ -191,6 +177,7 @@ services:
     image: grafana/grafana:${GRAFANA_TAG:-latest}
     container_name: grafana
     restart: unless-stopped
+    user: "104:104"
     # ports:
       # - "3000:3000"
     volumes:
@@ -211,40 +198,6 @@ services:
       resources:
         limits: { cpus: '0.50', memory: 512M }
 
-  # --- crowdSec ---
-  crowdsec:
-    image: crowdsecurity/crowdsec:${CROWDSEC_TAG:-latest}
-    container_name: crowdsec
-    restart: unless-stopped
-    depends_on:
-      - caddy
-    networks:
-      - registry-net
-    volumes:
-      - ./caddy/logs/access.log:/var/log/caddy/access.log:ro
-      - ./crowdsec/config:/etc/crowdsec:rw
-      - ./crowdsec/data:/var/lib/crowdsec/data:rw
-      - /var/log/syslog:/var/log/host/syslog:ro
-      - /var/log/ufw.log:/var/log/host/ufw.log:ro
-      - /var/log/sshd.log:/var/log/host/sshd.log:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    environment:
-      - TZ=Europe/London
-      - GID=$(id -g)
-    ports:
-      - "127.0.0.1:8080:8080"
-    healthcheck:
-      test: ["CMD", "cscli", "capi", "status"]
-      interval: 1m
-      timeout: 15s
-      retries: 3
-    logging:
-      driver: "json-file"
-      options: { max-size: "5m", max-file: "3" }
-    deploy:
-      resources:
-        limits: { cpus: '0.50', memory: 512M }
-
   # --- cAdvisor ---
   cadvisor:
     image: ghcr.io/google/cadvisor:${CADVISOR_TAG:-v0.53.0}
@@ -260,7 +213,7 @@ services:
       - /dev/disk/:/dev/disk:ro
     ports:
       - "127.0.0.1:8081:8080"
-      - "100.64.0.26:8081:8080"
+      - "100.126.183.85:8081:8080"
     networks:
       - registry-net
     restart: unless-stopped
@@ -291,3 +244,56 @@ services:
     deploy:
       resources:
         limits: { cpus: '0.25', memory: 128M }
+
+  # --- portainer ---
+  portainer:
+    image: portainer/portainer-ce:${PORTAINER_TAG:-latest}
+    container_name: portainer
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./portainer:/data
+    networks:
+      - registry-net
+    logging:
+      driver: "json-file"
+      options: { max-size: "5m", max-file: "3" }
+    deploy:
+      resources:
+        limits: { cpus: '0.25', memory: 256M }
+
+  # --- crowdSec ---
+  crowdsec:
+    image: crowdsecurity/crowdsec:${CROWDSEC_TAG:-latest}
+    container_name: crowdsec
+    restart: unless-stopped
+    depends_on:
+      - caddy
+    networks:
+      - registry-net
+    volumes:
+      - ./crowdsec/config:/etc/crowdsec:rw
+      - ./crowdsec/data:/var/lib/crowdsec/data:rw
+      - ./caddy/logs/access.log:/var/log/caddy/access.log:ro
+      - /var/log/syslog:/var/log/host/syslog:ro
+      - /var/log/ufw.log:/var/log/host/ufw.log:ro
+      - /var/log/auth.log:/var/log/host/auth.log:ro
+      - /var/log/kern.log:/var/log/host/kern.log:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - TZ=Europe/London
+      - GID=$(id -g)
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:6060:6060"
+    healthcheck:
+      test: ["CMD", "cscli", "capi", "status"]
+      interval: 1m
+      timeout: 15s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options: { max-size: "5m", max-file: "3" }
+    deploy:
+      resources:
+        limits: { cpus: '0.50', memory: 1G }
