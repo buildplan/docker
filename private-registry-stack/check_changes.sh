@@ -72,7 +72,6 @@ format_diff_changes() {
     local removed_repos=()
     local updated_repos=()
     local updated_details=""
-    local repo
     for repo in "${changed_repos[@]}"; do
         [[ -z "$repo" ]] && continue
         if echo "$added_lines" | grep -q "^${repo}:" && ! echo "$removed_lines" | grep -q "^${repo}:"; then
@@ -81,12 +80,11 @@ format_diff_changes() {
             removed_repos+=("$repo")
         else
             updated_repos+=("$repo")
-            updated_details+="* **${repo}**\n\`\`\`diff\n"
-            repo_added_tags=$(echo "$added_lines" | grep "^${repo}:" | sed "s/^${repo}:/+/g")
-            repo_removed_tags=$(echo "$removed_lines" | grep "^${repo}:" | sed "s/^${repo}:/-/g")
+            updated_details+="*${repo}*:\n"
+            repo_added_tags=$(echo "$added_lines" | grep "^${repo}:" | sed "s/^${repo}:/  + /")
+            repo_removed_tags=$(echo "$removed_lines" | grep "^${repo}:" | sed "s/^${repo}:/  - /")
             updated_details+="${repo_added_tags}\n"
             updated_details+="${repo_removed_tags}\n"
-            updated_details+="\`\`\`\n"
         fi
     done
     local message
@@ -97,21 +95,19 @@ format_diff_changes() {
         "${#updated_repos[@]}"
     )
     if [ ${#new_repos[@]} -gt 0 ]; then
-        message+="\n\n### 🚀 New Repositories\n\`\`\`diff\n"
+        message+="\n\n--- 🚀 New Repositories ---\n"
         for repo in "${new_repos[@]}"; do
             message+="+ ${repo}\n"
         done
-        message+="\`\`\`"
     fi
     if [ ${#removed_repos[@]} -gt 0 ]; then
-        message+="\n\n### 🗑️ Removed Repositories\n\`\`\`diff\n"
+        message+="\n\n--- 🗑️ Removed Repositories ---\n"
         for repo in "${removed_repos[@]}"; do
             message+="- ${repo}\n"
         done
-        message+="\`\`\`"
     fi
     if [ ${#updated_repos[@]} -gt 0 ]; then
-        message+="\n\n### ✨ Updated Repositories\n${updated_details}"
+        message+="\n\n--- ✨ Updated Repositories ---\n${updated_details}"
     fi
     printf "%b" "$message"
 }
