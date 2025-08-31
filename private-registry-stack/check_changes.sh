@@ -87,8 +87,8 @@ format_diff_changes() {
             updated_details+="\`\`\`\n"
         fi
     done
-    local message_header
-    message_header=$(printf "*Summary of changes on %s:*\n* 🚀 **New:** %s repos\n* 🗑️ **Removed:** %s repos\n* ✨ **Updated:** %s repos\n" \
+    local message
+    message=$(printf "*Summary of changes on %s:*\n* 🚀 **New:** %s repos\n* 🗑️ **Removed:** %s repos\n* ✨ **Updated:** %s repos\n" \
         "$HOSTNAME" \
         "${#new_repos[@]}" \
         "${#removed_repos[@]}" \
