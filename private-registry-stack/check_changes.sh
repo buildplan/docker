@@ -64,14 +64,14 @@ format_diff_changes() {
     added_lines=$(echo "$diff_output" | grep '^>' | sed 's/> //')
     local removed_lines
     removed_lines=$(echo "$diff_output" | grep '^<' | sed 's/< //')
-    local changed_repos
-    changed_repos=$( (echo "$added_lines"; echo "$removed_lines") | grep ':' | sed 's/:.*//' | sort -u)
+    local changed_repos=()
+    readarray -t changed_repos < <((echo "$added_lines"; echo "$removed_lines") | grep ':' | sed 's/:.*//' | sort -u)
     local new_repos=()
     local removed_repos=()
     local updated_repos=()
     local updated_details=""
     local repo
-    for repo in $changed_repos; do
+    for repo in "${changed_repos[@]}"; do
         [[ -z "$repo" ]] && continue
         if echo "$added_lines" | grep -q "^${repo}:" && ! echo "$removed_lines" | grep -q "^${repo}:"; then
             new_repos+=("$repo")
@@ -117,7 +117,6 @@ format_diff_changes() {
 main() {
     log "Starting detailed registry check..."
     trap 'rm -f "$TEMP_FILE"' EXIT
-
     if ! generate_detailed_state "$TEMP_FILE"; then
         log "Error: Failed to generate detailed repository state."
         send_ntfy "[Registry Check] ERROR" "Failed to generate detailed state from ${REGISTRY_HOST} on ${HOSTNAME}." "urgent" "x"
