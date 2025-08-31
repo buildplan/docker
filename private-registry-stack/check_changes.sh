@@ -20,6 +20,7 @@ HOSTNAME=$(hostname -s)
 
 # --- Helper Functions ---
 log() {
+    # Using printf for slightly more robust output
     printf '[%s] %s\n' "$(date +'%Y-%m-%d %H:%M:%S')" "$*"
 }
 
