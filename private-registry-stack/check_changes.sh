@@ -28,14 +28,16 @@ send_ntfy() {
     if [[ -n "${NTFY_TOKEN}" ]]; then
         auth_header=(-H "Authorization: Bearer ${NTFY_TOKEN}")
     fi
-    curl -sf --connect-timeout 5 --max-time 10 \
+    if ! curl -sf --connect-timeout 5 --max-time 10 \
         "${auth_header[@]}" \
         -H "Title: ${title}" \
         -H "Priority: ${priority}" \
         -H "Tags: ${tags}" \
         -H "Markdown: yes" \
         -d "${message}" \
-        "${NTFY_URL}/${NTFY_TOPIC}"
+        "${NTFY_URL}/${NTFY_TOPIC}"; then
+        log "Error: Failed to send ntfy notification to ${NTFY_URL}/${NTFY_TOPIC}"
+    fi
 }
 generate_detailed_state() {
     local output_file="$1"
@@ -85,11 +87,13 @@ format_diff_changes() {
             updated_details+="\`\`\`\n"
         fi
     done
-    local message
-    message=$(printf "*Summary of changes on %s:*\n" "$HOSTNAME")
-    message+=$(printf "* 🚀 **New:** %s repos\n" "${#new_repos[@]}")
-    message+=$(printf "* 🗑️ **Removed:** %s repos\n" "${#removed_repos[@]}")
-    message+=$(printf "* ✨ **Updated:** %s repos\n" "${#updated_repos[@]}")
+    local message_header
+    message_header=$(printf "*Summary of changes on %s:*\n* 🚀 **New:** %s repos\n* 🗑️ **Removed:** %s repos\n* ✨ **Updated:** %s repos\n" \
+        "$HOSTNAME" \
+        "${#new_repos[@]}" \
+        "${#removed_repos[@]}" \
+        "${#updated_repos[@]}"
+    )
     if [ ${#new_repos[@]} -gt 0 ]; then
         message+="\n\n### 🚀 New Repositories\n\`\`\`diff\n"
         for repo in "${new_repos[@]}"; do
