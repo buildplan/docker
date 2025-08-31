@@ -1,0 +1,138 @@
+# --- Global options ---
+{
+	email letse@mydomain.tld
+	admin :2019
+	metrics
+
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 10mb
+			roll_keep 5
+			roll_keep_for 360h
+		}
+		format json
+		level INFO
+	}
+
+	# --- CrowdSec Bouncer Configuration ---
+	crowdsec {
+		api_url http://crowdsec:8080
+		api_key xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+		ticker_interval 15s
+		appsec_url http://crowdsec:7422
+	}
+}
+
+# --- Registry API Block ---
+registry.mydomain.tld {
+	route {
+		basic_auth {
+			user xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+			serve_push xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+		}
+
+		header {
+			Strict-Transport-Security "max-age=31536000;"
+			X-Frame-Options "DENY"
+			X-Content-Type-Options "nosniff"
+			X-XSS-Protection "0"
+			Referrer-Policy "strict-origin-when-cross-origin"
+			Content-Security-Policy "default-src 'none'; frame-ancestors 'none';"
+		}
+		reverse_proxy registry:5000 {
+			transport http {
+				dial_timeout 5s
+				response_header_timeout 5m
+			}
+		}
+	}
+}
+
+# --- UI Block ---
+ui.registry.mydomain.tld {
+	route {
+		crowdsec
+		appsec
+
+		basic_auth {
+			user_reg xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+		}
+
+		header {
+			Strict-Transport-Security "max-age=31536000;"
+			X-Frame-Options "SAMEORIGIN"
+			X-Content-Type-Options "nosniff"
+			X-XSS-Protection "0"
+			Referrer-Policy "strict-origin-when-cross-origin"
+			Permissions-Policy "camera=(), microphone=(), geolocation=()"
+			Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; font-src 'self'; form-action 'self'; frame-ancestors 'none';"
+		}
+
+		reverse_proxy registry-ui:80
+	}
+}
+
+# --- Portainer Block ---
+port.registry.mydomain.tld {
+	route {
+		crowdsec
+		appsec
+
+		basic_auth {
+			user_port xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+		}
+
+		header {
+			Strict-Transport-Security "max-age=31536000;"
+			X-Frame-Options "SAMEORIGIN"
+			X-Content-Type-Options "nosniff"
+			X-XSS-Protection "0"
+			Referrer-Policy "strict-origin-when-cross-origin"
+			Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		}
+
+		reverse_proxy http://portainer:9000
+	}
+}
+
+# --- Prometheus Block ---
+prom.registry.mydomain.tld {
+	route {
+		crowdsec
+		appsec
+
+		basic_auth {
+			user xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+		}
+
+		header {
+			Strict-Transport-Security "max-age=31536000;"
+			X-Frame-Options "SAMEORIGIN"
+			X-Content-Type-Options "nosniff"
+			X-XSS-Protection "0"
+			Referrer-Policy "strict-origin-when-cross-origin"
+			Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		}
+
+		reverse_proxy http://prometheus:9090
+	}
+}
+
+# --- Grafana Block ---
+stats.registry.mydomain.tld {
+	route {
+		crowdsec
+		appsec
+
+		header {
+			Strict-Transport-Security "max-age=31536000;"
+			X-Frame-Options "SAMEORIGIN"
+			X-Content-Type-Options "nosniff"
+			X-XSS-Protection "0"
+			Referrer-Policy "strict-origin-when-cross-origin"
+			Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		}
+
+		reverse_proxy http://grafana:3000
+	}
+}
