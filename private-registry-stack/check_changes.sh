@@ -15,7 +15,7 @@ TEMP_FILE="${LOG_DIR}/registry_state_detailed.tmp"
 SCRIPT_LOG_FILE="${LOG_DIR}/check_registry_changes.log"
 NTFY_URL=$(<"${SECRETS_DIR}/ntfy_url")
 NTFY_TOPIC=$(<"${SECRETS_DIR}/ntfy_topic")
-NTFY_TOKEN==$(<"${SECRETS_DIR}/ntfy_token")
+NTFY_TOKEN=$(<"${SECRETS_DIR}/ntfy_token")
 HOSTNAME=$(hostname -s)
 
 # --- Helper Functions ---
