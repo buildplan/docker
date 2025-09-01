@@ -1,4 +1,4 @@
-## Directory Structure
+### Directory Structure
 
 ```
 forgejo/
@@ -13,4 +13,11 @@ forgejo/
 │   └── DD_STUFF...
 └── runner
     └── data
+```
+
+### Add this in `~/forgejo/runner/data/`
+
+```
+container:
+  network: forgejo_forgejo
 ```
