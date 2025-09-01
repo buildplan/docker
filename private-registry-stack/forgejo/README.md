@@ -15,7 +15,15 @@ forgejo/
     └── data
 ```
 
-### Add this in `~/forgejo/runner/data/`
+### Change runner config at `~/forgejo/runner/data/config.yml`
+
+If there is no `config.yml` execute this:
+
+```
+docker compose exec runner forgejo-runner generate-config > ~/forgejo/runner/data/config.yml
+```
+
+Then `nano ~/forgejo/runner/data/config.yml` and add the network which is defined in docker compose file. 
 
 ```
 container:
