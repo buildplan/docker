@@ -39,7 +39,7 @@ services:
       driver: "json-file"
       options: { max-size: "5m", max-file: "3" }
 
-  # --- database ---
+  # --- forgejo DB ---
   forgejo-db:
     image: postgres:${DB_VER:-17-alpine}
     container_name: forgejo-db
@@ -62,38 +62,24 @@ services:
       options: { max-size: "5m", max-file: "3" }
 
   # --- ruuner ---
-  docker-in-docker:
-    image: docker:dind
-    container_name: 'docker_dind'
-    networks:
-      - forgejo
-    privileged: 'true'
-    command: ['dockerd', '-H', 'tcp://0.0.0.0:2375', '--tls=false']
-    restart: 'unless-stopped'
-    logging:
-      driver: "json-file"
-      options: { max-size: "5m", max-file: "3" }
-
   forgejo-runner:
     image: code.forgejo.org/forgejo/runner:${RUNNER_VER:-9}
-    links:
-      - docker-in-docker
     depends_on:
-      docker-in-docker:
-        condition: service_started
       forgejo-server:
         condition: service_started
     container_name: forgejo-runner
     networks:
       - forgejo
-    environment:
-      DOCKER_HOST: tcp://docker-in-docker:2375
     user: 1001:1001
+    group_add:
+      - 994
     volumes:
       - ./runner/data:/data
+      - ./runner/data/config.yml:/data/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock
     restart: 'unless-stopped'
     # command: '/bin/sh -c "while : ; do sleep 1 ; done ;"'   # used for registering the runner with server
-    command: '/bin/sh -c "sleep 5; forgejo-runner daemon"'
+    command: '/bin/sh -c "sleep 5; forgejo-runner daemon --config /data/config.yml"'
     logging:
       driver: "json-file"
       options: { max-size: "5m", max-file: "3" }
