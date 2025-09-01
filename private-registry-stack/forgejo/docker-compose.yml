@@ -1,0 +1,99 @@
+networks:
+  forgejo:
+    external: false
+
+services:
+  # --- forgejo server ---
+  forgejo-server:
+    image: codeberg.org/forgejo/forgejo:${SERVER_VER:-12}
+    container_name: forgejo-server
+    environment:
+      - USER_UID=1001
+      - USER_GID=1001
+      - FORGEJO__actions__ENABLED=true
+      - FORGEJO__database__DB_TYPE=postgres
+      - FORGEJO__database__HOST=forgejo-db:5432
+      - FORGEJO__database__NAME=${POSTGRES_DB}
+      - FORGEJO__database__USER=${POSTGRES_USER}
+      - FORGEJO__database__PASSWD=${POSTGRES_PASSWORD}
+      - FORGEJO__server__ROOT_URL=${FORGEJO_ROOT_URL}
+      - FORGEJO__server__SSH_DOMAIN=${FORGEJO_SSH_DOMAIN}
+      - FORGEJO__server__SSH_PORT=555
+      - FORGEJO__server__SSH_LISTEN_PORT=22
+    restart: unless-stopped
+    networks:
+      - forgejo
+    volumes:
+      - ./forgejo-data:/data
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "127.0.0.1:3009:3000"
+      - "100.115.52.19:3009:3000"
+      - "172.22.11.5:3009:3000"
+      - "555:22"
+    depends_on:
+      forgejo-db:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options: { max-size: "5m", max-file: "3" }
+
+  # --- database ---
+  forgejo-db:
+    image: postgres:${DB_VER:-17-alpine}
+    container_name: forgejo-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    networks:
+      - forgejo
+    volumes:
+      - ./forgejo-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options: { max-size: "5m", max-file: "3" }
+
+  # --- ruuner ---
+  docker-in-docker:
+    image: docker:dind
+    container_name: 'docker_dind'
+    networks:
+      - forgejo
+    privileged: 'true'
+    command: ['dockerd', '-H', 'tcp://0.0.0.0:2375', '--tls=false']
+    restart: 'unless-stopped'
+    logging:
+      driver: "json-file"
+      options: { max-size: "5m", max-file: "3" }
+
+  forgejo-runner:
+    image: code.forgejo.org/forgejo/runner:${RUNNER_VER:-9}
+    links:
+      - docker-in-docker
+    depends_on:
+      docker-in-docker:
+        condition: service_started
+      forgejo-server:
+        condition: service_started
+    container_name: forgejo-runner
+    networks:
+      - forgejo
+    environment:
+      DOCKER_HOST: tcp://docker-in-docker:2375
+    user: 1001:1001
+    volumes:
+      - ./runner/data:/data
+    restart: 'unless-stopped'
+    # command: '/bin/sh -c "while : ; do sleep 1 ; done ;"'   # used for registering the runner with server
+    command: '/bin/sh -c "sleep 5; forgejo-runner daemon"'
+    logging:
+      driver: "json-file"
+      options: { max-size: "5m", max-file: "3" }
