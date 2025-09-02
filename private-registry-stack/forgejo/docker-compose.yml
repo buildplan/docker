@@ -61,9 +61,9 @@ services:
       driver: "json-file"
       options: { max-size: "5m", max-file: "3" }
 
-  # --- ruuner ---
+  # --- forgejo ruuner ---
   forgejo-runner:
-    image: code.forgejo.org/forgejo/runner:${RUNNER_VER:-9}
+    image: code.forgejo.org/forgejo/runner:${RUNNER_VER:-10}
     depends_on:
       forgejo-server:
         condition: service_started
@@ -72,11 +72,11 @@ services:
       - forgejo
     user: 1001:1001
     group_add:
-      - 994
+      - 994  # GID of the 'docker' group on the host
     volumes:
       - ./runner/data:/data
       - ./runner/data/config.yml:/data/config.yml:ro
-      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/run/docker.sock:/var/run/docker.sock # Used by runner - avoiding Docker network issues with docker-indocker 
     restart: 'unless-stopped'
     # command: '/bin/sh -c "while : ; do sleep 1 ; done ;"'   # used for registering the runner with server
     command: '/bin/sh -c "sleep 5; forgejo-runner daemon --config /data/config.yml"'
