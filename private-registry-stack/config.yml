@@ -1,4 +1,4 @@
-# ~/private-registry-setup/docker-registry/config.yml
+# ~/registry/docker-registry/config.yml
 version: 0.1
 log:
   level: info
@@ -8,10 +8,12 @@ storage:
     rootdirectory: /var/lib/registry
   delete:
     enabled: true
+  cache:
+    blobdescriptor: redis
 
 http:
   addr: :5000
-  secret: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  secret: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
   debug:
     addr: :5001
     prometheus:
@@ -20,14 +22,45 @@ http:
 
 notifications:
   endpoints:
-    - name: "mycustomntfyreceiver"
-      url: "http://registry-webhook-receiver:5001/notify"
-      timeout: 5s
-      threshold: 2
+    - name: registry-ui2
+      url: http://registry-ui2:8000/event-receiver
+      timeout: 1s
+      threshold: 5
       backoff: 10s
+      headers:
+        Authorization: [Bearer xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx]
+
+#    includereferences: true
+#    - name: "ntfy"
+#      disabled: false
+#      url: "https://ntfy.domain.tld/registry-events"
+#      headers:
+#        Authorization: ["Bearer tk_xxxxxxxxxxxxxxxxxxxxxx"]
+#        Title: ["Docker Registry Event"]
+#        Tags: ["docker"]
+#      timeout: 3s
+#      threshold: 5
+#      backoff: 5s
+#      ignore:
+#        mediaTypes:
+#          - application/octet-stream
+#        actions:
+#          - pull
+#          - mount
+#          - delete
 
 health:
   storagedriver:
     enabled: true
     interval: 10s
     threshold: 3
+
+redis:
+  addrs: [redis:6379]
+  db: 0
+  dialtimeout: 10ms
+  readtimeout: 10ms
+  writetimeout: 10ms
+  maxidleconns: 16
+  poolsize: 64
+  connmaxidletime: 300s
