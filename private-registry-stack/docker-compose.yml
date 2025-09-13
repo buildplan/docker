@@ -11,7 +11,9 @@ services:
       - ./docker-registry/data:/var/lib/registry
       - ./docker-registry/config.yml:/etc/distribution/config.yml:ro
     networks:
-      - registry-net
+      registry-net:
+        aliases:
+          - ${PULL_URL}
     environment:
       OTEL_TRACES_EXPORTER: "none"
       REGISTRY_HTTP_SECRET: ${REGISTRY_HTTP_SECRET}
@@ -107,6 +109,35 @@ services:
     deploy:
       resources:
         limits: { cpus: '0.25', memory: 256M }
+
+  # --- ui2 ---
+  registry-ui2:
+    image: quiq/registry-ui:${UI2_TAG:-latest}
+    container_name: registry-ui2
+    restart: unless-stopped
+    networks:
+      - registry-net
+    depends_on:
+      - registry
+    environment:
+      TZ: 'Europe/London'
+      REGISTRY_HOSTNAME: ${PULL_URL}:5000
+      REGISTRY_INSECURE: "true"
+      REGISTRY_TITLE: ${REGISTRY_TITLE}
+      EVENT_LISTENER_BEARER_TOKEN: ${EVENT_LISTENER_BEARER_TOKEN}
+      EVENT_LISTENER_RETENTION_DAYS: '30'
+      EVENT_LISTENER_DATABASE_DRIVER: 'sqlite3'
+      EVENT_LISTENER_DATABASE_LOCATION: 'data/registry_events.db'
+      PERFORMANCE_CATALOG_REFRESH_INTERVAL: '30'
+      PERFORMANCE_TAGS_COUNT_REFRESH_INTERVAL: '120'
+    volumes:
+      - ./registry-ui2/data:/opt/data
+    logging:
+      driver: "json-file"
+      options: { max-size: "5m", max-file: "3" }
+    deploy:
+      resources:
+        limits: { cpus: '0.10', memory: 128M }
 
   # --- regsync ---
   regsync:
