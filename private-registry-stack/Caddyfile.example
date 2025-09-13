@@ -72,6 +72,14 @@ ui.registry.mydomain.tld {
 	}
 }
 
+# --- UI2 Block ---
+ui2.registry.mydomain.tld {
+	basic_auth {
+		user_dock xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+	}
+	reverse_proxy registry-ui2:8000
+}
+
 # --- Portainer Block ---
 port.registry.mydomain.tld {
 	route {
