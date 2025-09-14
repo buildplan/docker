@@ -11,9 +11,7 @@ services:
       - ./docker-registry/data:/var/lib/registry
       - ./docker-registry/config.yml:/etc/distribution/config.yml:ro
     networks:
-      registry-net:
-        aliases:
-          - ${PULL_URL}
+      - registry-net
     environment:
       OTEL_TRACES_EXPORTER: "none"
       REGISTRY_HTTP_SECRET: ${REGISTRY_HTTP_SECRET}
@@ -121,7 +119,7 @@ services:
       - registry
     environment:
       TZ: 'Europe/London'
-      REGISTRY_HOSTNAME: ${PULL_URL}:5000
+      REGISTRY_HOSTNAME: registry:5000
       REGISTRY_INSECURE: "true"
       REGISTRY_TITLE: ${REGISTRY_TITLE}
       EVENT_LISTENER_BEARER_TOKEN: ${EVENT_LISTENER_BEARER_TOKEN}
