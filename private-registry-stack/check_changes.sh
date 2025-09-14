@@ -82,8 +82,8 @@ format_diff_changes() {
         else
             updated_repos+=("$repo")
             updated_details+="*${repo}*:\n"
-            repo_added_tags=$(echo "$added_lines" | grep "^${repo}:" | sed "s/^${repo}:/  + /")
-            repo_removed_tags=$(echo "$removed_lines" | grep "^${repo}:" | sed "s/^${repo}:/  - /")
+            repo_added_tags=$(echo "$added_lines" | grep "^${repo}:" | sed "s#^${repo}:#  + #")
+            repo_removed_tags=$(echo "$removed_lines" | grep "^${repo}:" | sed "s#^${repo}:#  - #")
             updated_details+="${repo_added_tags}\n"
             updated_details+="${repo_removed_tags}\n"
         fi
