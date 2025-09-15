@@ -245,7 +245,7 @@ main() {
     trap 'rm -f "$TEMP_FILE"' EXIT
     if ! generate_detailed_state "$TEMP_FILE"; then
         log "Error: Failed to generate detailed repository state."
-        send_ntfy "Registry Error on ${HOSTNAME}" "Failed to check ${REGISTRY_HOST} on ${HOSTNAME}" "urgent" "warning"
+        send_ntfy "Registry Error on ${HOSTNAME}" "Failed to check ${REGISTRY_HOST} on ${HOSTNAME}" "high" "warning"
         return 1
     fi
     if [ -f "$STATE_FILE" ]; then
@@ -264,9 +264,16 @@ main() {
                     ;;
             esac
             local coloured_output
-            coloured_output=$(printf "%s" "$formatted_message" | sed -e "s/^+ /${C_OK}+ /" -e "s/^- /${C_ERR}- /" -e "s/^~ /${C_WARN}~ /" -e "s/$/${C_RESET}/")
-            printf "Registry content changed:\n%b\n" "${coloured_output}"
-            send_ntfy "Registry Changes on ${HOSTNAME}" "${formatted_message}" "high" "package"
+            coloured_output=$(while IFS= read -r line; do
+                case "$line" in
+                    "+ "*) printf "%b%s%b\n" "${C_OK}" "${line}" "${C_RESET}" ;;
+                    "- "*) printf "%b%s%b\n" "${C_ERR}" "${line}" "${C_RESET}" ;;
+                    "~ "*) printf "%b%s%b\n" "${C_WARN}" "${line}" "${C_RESET}" ;;
+                    *)     printf "%s\n" "$line" ;;
+                esac
+            done <<< "$formatted_message")
+            printf "Registry content changed:\n%s\n" "${coloured_output}"
+            send_ntfy "Registry Changes on ${HOSTNAME}" "${formatted_message}" "default" "package"
             mv "$TEMP_FILE" "$STATE_FILE"
         else
             log "No changes detected."
