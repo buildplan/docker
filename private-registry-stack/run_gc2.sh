@@ -58,7 +58,6 @@ EXAMPLES:
 }
 
 log() {
-    # Skip logging in quiet mode unless it's an error or warning
     if [[ "$QUIET_MODE" == true ]] && [[ "$*" != Error:* ]] && [[ "$*" != Warning:* ]]; then
         return
     fi
@@ -118,20 +117,48 @@ send_ntfy() {
     return 0
 }
 
-display_gc_summary() {
+format_gc_results() {
     local gc_output="$1"
+    local for_notification="$2"  # true/false
+
+    # Extract summary stats
+    local blobs_marked=$(echo "$gc_output" | grep -o '[0-9]\+ blobs marked' | head -1)
+    local blobs_eligible=$(echo "$gc_output" | grep -o '[0-9]\+ blobs.*eligible' | head -1)
+    local manifests_eligible=$(echo "$gc_output" | grep -o '[0-9]\+ manifests eligible' | head -1)
+
+    # Build summary
+    local summary_parts=()
+    [[ -n "$blobs_marked" ]] && summary_parts+=("$blobs_marked")
+    [[ -n "$blobs_eligible" ]] && summary_parts+=("$blobs_eligible")
+    [[ -n "$manifests_eligible" ]] && summary_parts+=("$manifests_eligible")
+
     local summary
-
-    # Extract meaningful summary information
-    summary=$(echo "$gc_output" | grep -E 'blob files removed|manifest files removed|blobs marked|manifests eligible' | paste -sd ' | ' -)
-
-    if [ -z "$summary" ]; then
+    if [[ ${#summary_parts[@]} -gt 0 ]]; then
+        summary=$(IFS=' | '; echo "${summary_parts[*]}")
+    else
         summary="No unused items found to delete"
-        if [[ -t 1 ]]; then
-            printf "%b%s%b\n" "${C_DIM}" "$summary" "${C_RESET}"
+    fi
+
+    # Handle deletion details differently for notifications vs terminal
+    local deletions
+    deletions=$(echo "$gc_output" | grep "Deleting" | head -20)
+    local deletion_count=$(echo "$gc_output" | grep -c "Deleting" || echo "0")
+    if [[ "$for_notification" == "true" ]]; then
+
+        # NOTIFICATION VERSION - Clean and concise
+        local details=""
+        if [[ "$DRY_RUN" == true ]]; then
+            details="Dry run mode: no actual deletions performed"
+        elif [[ $deletion_count -eq 0 ]]; then
+            details="No files were deleted"
+        elif [[ $deletion_count -le 3 ]]; then
+            # Show few deletions in notification
+            details="Deleted items:"$'\n'"$(echo "$deletions" | sed 's/.*Deleting [^:]*: /• /' | sed 's|/docker/registry/v2/[^/]*/||g')"
         else
-            echo "$summary"
+            # Summarize many deletions
+            details="Successfully deleted $deletion_count items (see logs for full details)"
         fi
+        echo "$summary"$'\n\n'"$details"
     else
         if [[ -t 1 ]]; then
             printf "%b📋 GC Results:%b %s\n" "${C_BOLD}${C_OK}" "${C_RESET}" "$summary"
@@ -139,24 +166,22 @@ display_gc_summary() {
             printf "GC Results: %s\n" "$summary"
         fi
 
-        # Show deletion details if not dry run
-        if [[ "$DRY_RUN" == false ]]; then
-            local deletions
-            deletions=$(echo "$gc_output" | grep "Deleting" | head -10)
-            if [[ -n "$deletions" ]]; then
-                if [[ -t 1 ]]; then
-                    printf "%b🗑️  Recent deletions:%b\n" "${C_DIM}" "${C_RESET}"
-                    echo "$deletions" | while IFS= read -r line; do
-                        printf "%b  %s%b\n" "${C_DIM}" "$line" "${C_RESET}"
-                    done
-                else
-                    echo "Recent deletions:"
-                    echo "$deletions"
-                fi
+        # Show deletion details in terminal
+        if [[ "$DRY_RUN" == false ]] && [[ $deletion_count -gt 0 ]]; then
+            if [[ -t 1 ]]; then
+                printf "%b🗑️  Deleted %d items:%b\n" "${C_DIM}" "$deletion_count" "${C_RESET}"
+                echo "$deletions" | head -10 | while IFS= read -r line; do
+                    printf "%b  %s%b\n" "${C_DIM}" "$line" "${C_RESET}"
+                done
+                [[ $deletion_count -gt 10 ]] && printf "%b  ... and %d more (see log file)%b\n" "${C_DIM}" "$((deletion_count - 10))" "${C_RESET}"
+            else
+                echo "Deleted $deletion_count items:"
+                echo "$deletions" | head -10
+                [[ $deletion_count -gt 10 ]] && echo "  ... and $((deletion_count - 10)) more (see log file)"
             fi
         fi
+        echo "$summary"
     fi
-    echo "$summary"
 }
 
 # --- Argument Parsing ---
@@ -194,7 +219,6 @@ main() {
     if [[ -f "${NTFY_TOKEN_FILE}" ]]; then
         read -r NTFY_TOKEN < "${NTFY_TOKEN_FILE}"
     fi
-
     local dry_run_msg=""
     if [[ "$DRY_RUN" == true ]]; then
         dry_run_msg=" (Dry Run)"
@@ -204,7 +228,6 @@ main() {
             echo "--- DRY RUN MODE ENABLED ---"
         fi
     fi
-
     log "Registry GC process started${dry_run_msg}"
     log "Container: ${REGISTRY_CONTAINER}"
 
@@ -225,7 +248,6 @@ main() {
         send_ntfy "[Registry GC] ❌ Failed${dry_run_msg}" "GC failed: Registry container '${REGISTRY_CONTAINER}' is not running on $(hostname)" "high" "warning"
         exit 1
     fi
-
     log "Running garbage collection..."
     local gc_output gc_exit_code=0
 
@@ -238,7 +260,6 @@ main() {
         log "--- Failed Command Output ---"
         printf '%s\n' "$gc_output" | tee -a "${LOG_FILE}"
         log "--- End Error Output ---"
-
         local storage_after_failure
         storage_after_failure=$(get_storage_usage)
         local fail_message
@@ -246,7 +267,6 @@ main() {
         send_ntfy "[Registry GC] ❌ Failed${dry_run_msg}" "$fail_message" "high" "warning"
         exit $gc_exit_code
     fi
-
     log "Garbage collection completed successfully"
 
     # Get final storage
@@ -254,14 +274,17 @@ main() {
     storage_after=$(get_storage_usage)
     format_storage_info "$storage_after" "📊 Final Storage:"
 
-    # Display and log summary
-    local summary
-    summary=$(display_gc_summary "$gc_output")
-    log "GC Summary: $summary"
+    # Display detailed results in terminal and logs
+    local terminal_summary
+    terminal_summary=$(format_gc_results "$gc_output" "false")
+    log "GC Summary: $terminal_summary"
 
-    # Send success notification
+    # Send concise notification
+    local notification_summary
+    notification_summary=$(format_gc_results "$gc_output" "true")
     local message_body
-    message_body=$(printf "GC completed successfully on %s%s\n\n%s\n\n📊 Before: %s\n📊 After:  %s" "$(hostname)" "$dry_run_msg" "$summary" "$storage_before" "$storage_after")
+    message_body=$(printf "GC completed successfully on %s%s\n\n%s\n\n📊 Before: %s\n📊 After:  %s" \
+        "$(hostname)" "$dry_run_msg" "$notification_summary" "$storage_before" "$storage_after")
     send_ntfy "[Registry GC] ✅ Completed${dry_run_msg}" "$message_body" "default" "white_check_mark"
     log "Registry GC process finished"
     return 0
