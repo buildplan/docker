@@ -5,8 +5,9 @@ PROJECT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
 SECRETS_DIR="${PROJECT_DIR}/secrets"
 REGSYNC_FILE="${PROJECT_DIR}/regsync.yml"
 LOG_DIR="${PROJECT_DIR}/logs"
-GOTIFY_TOKEN_FILE="${SECRETS_DIR}/gotify_token"
-GOTIFY_URL=$(<"${SECRETS_DIR}/gotify_url")
+NTFY_URL=$(<"${SECRETS_DIR}/ntfy_url")
+NTFY_TOKEN=$(<"${SECRETS_DIR}/ntfy_token")
+NTFY_TOPIC=$(<"${SECRETS_DIR}/ntfy_topic")
 PRIVATE_REGISTRY_HOST=$(<"${SECRETS_DIR}/registry_host")
 BACKUP_DIR="${LOG_DIR}/regsync_backups"
 YQ_CMD="yq" # Path to yq binary if not in default PATH
@@ -38,9 +39,9 @@ success(){ echo -e "${GREEN}[SUCCESS]${NC} $*"; }
 
 # ANSI-aware, word-boundary wrapping AWK (complete)
 read -r -d '' AWK_TABLE_FORMATTER_SCRIPT << 'EOF'
-function strip_ansi(s,    t) { t = s; gsub(/\x1B\[[0-9;]*[[:alpha:]]/,"",t); return t }
+function strip_ansi(s,   t) { t = s; gsub(/\x1B\[[0-9;]*[[:alpha:]]/,"",t); return t }
 function vlen(s) { return length(strip_ansi(s)) }
-function pad_and_print(idx, line,    pad) {
+function pad_and_print(idx, line,   pad) {
     pad = SRC_W - vlen(line); if (pad < 0) pad = 0
     printf "│ %s │ %s%*s │\n", idx, line, pad, ""
 }
@@ -102,14 +103,33 @@ check_yq() {
   fi
 }
 
-# Function to send Gotify message
-send_gotify() {
-  local title="$1" message="$2" priority="$3"
-  if [[ ! -f "${GOTIFY_TOKEN_FILE}" ]]; then warn "Gotify token file missing at ${GOTIFY_TOKEN_FILE}"; return 1; fi
-  local token; token=$(<"$GOTIFY_TOKEN_FILE")
-  [[ -z "$token" ]] && { warn "Gotify token file is empty"; return 1; }
-  [[ -z "$GOTIFY_URL" ]] && { warn "Gotify URL is empty. Check secrets/gotify_url"; return 1; }
-  curl -sf --connect-timeout 5 --max-time 10 -X POST "${GOTIFY_URL}/message?token=${token}" -F "title=${title}" -F "message=${message}" -F "priority=${priority}" &>/dev/null
+# Function to send ntfy message
+send_ntfy() {
+  local title="$1" message="$2" gotify_priority="$3" ntfy_priority
+
+  # Map Gotify's numeric priority to ntfy's named priority
+  case "$gotify_priority" in
+    8) ntfy_priority="high" ;;
+    *) ntfy_priority="default" ;; # For priority 4 and others
+  esac
+
+  # Basic validation for ntfy config from secrets
+  [[ -z "$NTFY_URL" ]] && { warn "ntfy URL is empty. Check secrets/ntfy_url"; return 1; }
+  [[ -z "$NTFY_TOPIC" ]] && { warn "ntfy topic is empty. Check secrets/ntfy_topic"; return 1; }
+
+  # Prepare curl command arguments in an array for robustness
+  local curl_args=()
+  curl_args+=(-sf --connect-timeout 5 --max-time 10)
+  curl_args+=(-H "Title: ${title}")
+  curl_args+=(-H "Priority: ${ntfy_priority}")
+  curl_args+=(-d "${message}")
+
+  # Add Authorization header only if a token exists and is not empty
+  if [[ -n "$NTFY_TOKEN" ]]; then
+    curl_args+=(-H "Authorization: Bearer ${NTFY_TOKEN}")
+  fi
+
+  curl "${curl_args[@]}" "${NTFY_URL}/${NTFY_TOPIC}" &>/dev/null
   return $?
 }
 
@@ -268,7 +288,7 @@ add_entry() {
     log "Adding entry: $source_image -> $target_image"
     if $DRY_RUN; then log "[Dry Run] Would add entry to $REGSYNC_FILE"; return 0; fi
 
-    "$YQ_CMD" eval --inplace '.sync //= []' "$REGSYNC_FILE"
+    "$YQ_CMD" eval --inplace '.sync = .sync // []' "$REGSYNC_FILE"
     local yq_add_command; yq_add_command=$(printf '.sync += [{"source": "%s", "target": "%s", "type": "%s"}]' "$source_image" "$target_image" "$sync_type")
 
     if [[ ${#tags_allow_patterns[@]} -gt 0 ]]; then
@@ -288,10 +308,10 @@ add_entry() {
 
     if "$YQ_CMD" eval --inplace "$yq_add_command" "$REGSYNC_FILE"; then
         success "Successfully added: $source_image"
-        send_gotify "[Regsync Config] Added" "Added source: ${source_image}" 4
+        send_ntfy "[Regsync Config] Added" "Added source: ${source_image}" 4
     else
         error "Failed to modify $REGSYNC_FILE when adding entry."
-        send_gotify "[Regsync Config] ERROR" "Failed to add: ${source_image}" 8
+        send_ntfy "[Regsync Config] ERROR" "Failed to add: ${source_image}" 8
         return 1
     fi
 }
@@ -356,8 +376,10 @@ edit_entry() {
                     break ;;
                 "Replace All Tag Patterns")
                     local new_patterns=()
+                    # Modified to allow empty input to finish
                     while true; do
-                        local pattern; get_input_required "Enter a tag pattern (or press Enter to finish): " pattern ""
+                        local pattern
+                        read -p "Enter a tag pattern (or press Enter to finish): " pattern
                         [[ -z "$pattern" ]] && break
                         new_patterns+=("$pattern")
                     done
@@ -391,10 +413,10 @@ edit_entry() {
     if ! backup_config; then error "Backup failed. Aborting edit."; return 1; fi
     if "$YQ_CMD" eval --inplace "$yq_update_cmd" "$REGSYNC_FILE"; then
         success "Successfully updated entry #$entry_number."
-        send_gotify "[Regsync Config] Edited" "Edited entry #${entry_number}. New source: ${new_source}" 4
+        send_ntfy "[Regsync Config] Edited" "Edited entry #${entry_number}. New source: ${new_source}" 4
     else
         error "yq command failed to update entry #$entry_number."
-        send_gotify "[Regsync Config] ERROR" "Edit command failed for entry #${entry_number}" 8
+        send_ntfy "[Regsync Config] ERROR" "Edit command failed for entry #${entry_number}" 8
         return 1
     fi
 }
@@ -424,10 +446,10 @@ delete_entry() {
 
     if "$YQ_CMD" eval --inplace "del(.sync[$yq_index])" "$REGSYNC_FILE"; then
         success "Successfully deleted entry: $source_to_delete"
-        send_gotify "[Regsync Config] Deleted" "Deleted: ${source_to_delete}" 4
+        send_ntfy "[Regsync Config] Deleted" "Deleted: ${source_to_delete}" 4
     else
         error "yq command failed to delete entry #$entry_number."
-        send_gotify "[Regsync Config] ERROR" "Deletion command failed for: ${source_to_delete}" 8
+        send_ntfy "[Regsync Config] ERROR" "Deletion command failed for: ${source_to_delete}" 8
         return 1
     fi
 }
