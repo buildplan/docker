@@ -107,24 +107,20 @@ check_yq() {
 send_ntfy() {
   local title="$1" message="$2" gotify_priority="$3" ntfy_priority
 
-  # Map Gotify's numeric priority to ntfy's named priority
   case "$gotify_priority" in
     8) ntfy_priority="high" ;;
     *) ntfy_priority="default" ;; # For priority 4 and others
   esac
 
-  # Basic validation for ntfy config from secrets
   [[ -z "$NTFY_URL" ]] && { warn "ntfy URL is empty. Check secrets/ntfy_url"; return 1; }
   [[ -z "$NTFY_TOPIC" ]] && { warn "ntfy topic is empty. Check secrets/ntfy_topic"; return 1; }
 
-  # Prepare curl command arguments in an array for robustness
   local curl_args=()
   curl_args+=(-sf --connect-timeout 5 --max-time 10)
   curl_args+=(-H "Title: ${title}")
   curl_args+=(-H "Priority: ${ntfy_priority}")
   curl_args+=(-d "${message}")
 
-  # Add Authorization header only if a token exists and is not empty
   if [[ -n "$NTFY_TOKEN" ]]; then
     curl_args+=(-H "Authorization: Bearer ${NTFY_TOKEN}")
   fi
@@ -206,7 +202,6 @@ display_entries() {
             if [[ ${#tags_array[@]} -gt 0 ]]; then
                 entry_lines_builder+=("$(printf "%s\t  %s%s%s" "" "${MAGENTA}" "tags:" "${NC}")")
                 for tag in "${tags_array[@]}"; do
-                    # The tag value itself is left uncolored for clarity
                     entry_lines_builder+=("$(printf "%s\t    - %s" "" "${tag}")")
                 done
             fi
@@ -366,7 +361,6 @@ edit_entry() {
                     select tag_to_remove in "${current_tags[@]}"; do
                         if [[ -n "$tag_to_remove" ]]; then
                             yq_update_cmd+=$(printf " | .sync[%d].tags.allow |= del(select(. == \"%s\"))" "$yq_index" "$tag_to_remove")
-                            # If that was the last tag, remove the .tags key entirely
                             yq_update_cmd+=$(printf " | if (.sync[%d].tags.allow | length) == 0 then del(.sync[%d].tags) else . end" "$yq_index" "$yq_index")
                             break
                         else
@@ -376,7 +370,6 @@ edit_entry() {
                     break ;;
                 "Replace All Tag Patterns")
                     local new_patterns=()
-                    # Modified to allow empty input to finish
                     while true; do
                         local pattern
                         read -p "Enter a tag pattern (or press Enter to finish): " pattern
