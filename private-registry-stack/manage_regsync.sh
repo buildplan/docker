@@ -30,6 +30,9 @@ YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
 MAGENTA='\033[0;35m'
 NC='\033[0m'
+if [[ ! -t 1 ]]; then
+    RED='' GREEN='' YELLOW='' BLUE='' MAGENTA='' NC=''
+fi
 
 # --- Helper Functions ---
 log()   { echo -e "${BLUE}[INFO]${NC}  $*"; }
@@ -449,11 +452,57 @@ delete_entry() {
 
 # Function to print help message
 print_help() {
-  echo -e "${BLUE}Usage:${NC} $0 [--dry-run] [--help]"
-  echo -e "  Interactively manage the regsync.yml configuration file.\n"
-  echo -e "${BLUE}Options:${NC}"
-  echo "  --dry-run      Preview changes without modifying files."
-  echo "  --help         Show this help message."
+    printf "%b" "Usage: $0 [--dry-run] [--help]\n\n"
+    printf "%b" "Interactive manager for regsync.yml configuration file.\n"
+    printf "%b" "Regsync synchronizes Docker images from public registries to your private registry.\n\n"
+
+    if [[ -t 1 ]]; then
+        printf "%b" "${GREEN}✓ Automatic backups before modifications${NC}\n"
+        printf "%b" "${YELLOW}⚠ Interactive prompts guide you through setup${NC}\n"
+        printf "%b" "${BLUE}📋 Beautiful table display of current entries${NC}\n\n"
+    fi
+
+    printf "%b" "OPTIONS:\n"
+    printf "%b" "  --dry-run      Preview changes without modifying files or creating backups\n"
+    printf "%b" "  --help         Show this help message\n\n"
+
+    printf "%b" "SUPPORTED REGISTRIES:\n"
+    if [[ -t 1 ]]; then
+        printf "%b" "  ${BLUE}•${NC} Docker Hub (official & user images)\n"
+        printf "%b" "  ${BLUE}•${NC} GitHub Container Registry (GHCR)\n" 
+        printf "%b" "  ${BLUE}•${NC} LinuxServer Container Registry (LSCR)\n"
+        printf "%b" "  ${BLUE}•${NC} Custom registries (Quay, etc.)\n\n"
+    else
+        printf "%b" "  • Docker Hub (official & user images)\n"
+        printf "%b" "  • GitHub Container Registry (GHCR)\n"
+        printf "%b" "  • LinuxServer Container Registry (LSCR)\n"
+        printf "%b" "  • Custom registries (Quay, etc.)\n\n"
+    fi
+
+    printf "%b" "SYNC TYPES:\n"
+    if [[ -t 1 ]]; then
+        printf "%b" "  ${MAGENTA}repository${NC} - Sync multiple tags using patterns (e.g., 'latest', 'v*.*')\n"
+        printf "%b" "  ${MAGENTA}image${NC}      - Sync single specific tag\n\n"
+    else
+        printf "%b" "  repository - Sync multiple tags using patterns (e.g., 'latest', 'v*.*')\n"
+        printf "%b" "  image      - Sync single specific tag\n\n"
+    fi
+
+    printf "%b" "INTERACTIVE MENU:\n"
+    printf "%b" "  1. Show Entries    - Display current sync configurations\n"
+    printf "%b" "  2. Add Entry       - Add new image/repository to sync\n"
+    printf "%b" "  3. Edit Entry      - Modify existing sync configuration\n"
+    printf "%b" "  4. Delete Entry    - Remove sync configuration\n"
+    printf "%b" "  5. Search Entries  - Find configurations by image name\n"
+    printf "%b" "  6. Backup Config   - Create manual backup\n\n"
+
+    printf "%b" "EXAMPLES:\n"
+    printf "%b" "  $0                 # Interactive management\n"
+    printf "%b" "  $0 --dry-run       # Preview changes without applying them\n\n"
+
+    printf "%b" "FILES:\n"
+    printf "%b" "  Config: $REGSYNC_FILE\n"
+    printf "%b" "  Backups: $BACKUP_DIR/\n"
 }
 
 # --- Argument Parsing ---
