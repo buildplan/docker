@@ -9,7 +9,7 @@
 #              logging and notifications via ntfy.
 #
 # buildplan.org
-# 28-08-2025
+# 06-10-2025
 # ==============================================================================
 
 # --- PURPOSE ---
@@ -38,11 +38,11 @@
 
 # --- USAGE ---
 # 1. Standard Execution (respects the time interval):
-#    ./check_and_sync.sh
+#    ./check_sync.sh
 # 2. Force Execution (bypasses the time interval check):
-#    ./check_and_sync.sh --force
+#    ./check_sync.sh --force
 # 3. Manual Rate-Limit Check (only checks the limit and exits):
-#    ./check_and_sync.sh --check
+#    ./check_sync.sh --hub-limit
 
 # --- WORKFLOW ---
 # 1.  Parses command-line arguments (e.g., --force).
@@ -117,7 +117,7 @@ MIN_INTERVAL_HOURS=6
 CRITICAL_THRESHOLD=75
 WARNING_THRESHOLD=175
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; CYAN='\033[0;36m'; NC='\033[0m'
 
 # ==============================================================================
 # Logging & Notification
@@ -209,7 +209,7 @@ check_rate_limit() {
 }
 
 # ==============================================================================
-# Manual Rate-Limit Check (for --check)
+# Manual Rate-Limit Check (for --hub-limit)
 # ==============================================================================
 run_manual_check() {
   docker_hub_login &>/dev/null || true
@@ -367,11 +367,12 @@ main() {
 # Usage & Dispatch
 # ==============================================================================
 usage() {
-  cat >&2 <<EOF
-Usage: $0 [--force | --check]
-  --force    Bypass interval check
-  --check    Only perform rate-limit check
-EOF
+  printf "\n" >&2
+  printf "${GREEN}Usage:${NC} ${CYAN}%s${NC} [--force | --hub-limit]\n" "$0" >&2
+  printf "\n" >&2
+  printf "  ${YELLOW}%-15s${NC} %s\n" "--force" "Bypass the minimum run interval check." >&2
+  printf "  ${YELLOW}%-15s${NC} %s\n" "--hub-limit" "Only check the Docker Hub rate limit and exit." >&2
+  printf "\n" >&2
   exit 1
 }
 
@@ -379,7 +380,7 @@ EOF
 set -o pipefail
 
 case "${1:-}" in
-  --check)
+  --hub-limit)
     run_manual_check
     ;;
   ""|--force)
