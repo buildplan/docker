@@ -19,6 +19,7 @@ services:
       - DIUN_PROVIDERS_DOCKER=true
       - DIUN_PROVIDERS_DOCKER_WATCHBYDEFAULT=true
       - DIUN_PROVIDERS_DOCKER_WATCHSTOPPED=true
+      - DIUN_WATCH_HEALTHCHECKS_UUID=${HEALTHCHECKS_UUID} # healthchecks.io
       - DIUN_NOTIF_NTFY_ENDPOINT=${NTFY_ENDPOINT} # ntfy settings in .env
       - DIUN_NOTIF_NTFY_TOPIC=${NTFY_TOPIC}
       - DIUN_NOTIF_NTFY_TOKEN=${NTFY_TOKEN}
@@ -53,13 +54,4 @@ services:
           memory: 128M
     security_opt:
       - no-new-privileges:true
-    healthcheck:
-      test:
-        - CMD
-        - diun
-        - version
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
 networks: {}
