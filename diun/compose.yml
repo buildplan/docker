@@ -39,6 +39,10 @@ services:
       DIUN_REGOPTS_0_NAME: ${PRIVATE_REG_URL}
       DIUN_REGOPTS_0_USERNAME: ${PRIVATE_REG_USER}
       DIUN_REGOPTS_0_PASSWORD: ${PRIVATE_REG_PASS}
+      # Docker Hub authentication to avoid rate limits
+      DIUN_REGOPTS_1_NAME: docker.io
+      DIUN_REGOPTS_1_USERNAME: ${DOCKERHUB_USERNAME}
+      DIUN_REGOPTS_1_PASSWORD: ${DOCKERHUB_PASSWORD}
     labels:
       - diun.enable=true
     restart: unless-stopped
