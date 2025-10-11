@@ -23,8 +23,8 @@ services:
       DIUN_PROVIDERS_DOCKER_WATCHSTOPPED: "true"
       DIUN_WATCH_FIRSTCHECKNOTIF: "false" # change to true for check on container start
       DIUN_DEFAULTS_NOTIFYON: new,update # Notify on both new images and updates
-      DIUN_WATCH_HEALTHCHECKS_UUID: ${HEALTHCHECKS_UUID} # healthcheck.io
-      DIUN_WATCH_HEALTHCHECKS_BASEURL: ${HEALTHCHECKS_BASEURL}
+      DIUN_WATCH_HEALTHCHECKS_BASEURL: ${HEALTHCHECKS_BASEURL} # healthcheck.io
+      DIUN_WATCH_HEALTHCHECKS_UUID: ${HEALTHCHECKS_UUID}
       DIUN_NOTIF_NTFY_ENDPOINT: ${NTFY_ENDPOINT} # ntfy for notifications
       DIUN_NOTIF_NTFY_TOPIC: ${NTFY_TOPIC}
       DIUN_NOTIF_NTFY_TOKEN: ${NTFY_TOKEN}
