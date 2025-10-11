@@ -9,6 +9,8 @@ services:
     volumes:
       - ./data:/data
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    security_opt:
+      - no-new-privileges:true
     tmpfs:
       - /tmp:size=64M,mode=1777
     environment:
@@ -51,6 +53,4 @@ services:
       options:
         max-size: 5m
         max-file: "2"
-    security_opt:
-      - no-new-privileges:true
 networks: {}
