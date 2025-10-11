@@ -4,7 +4,7 @@ services:
     image: ghcr.io/crazy-max/diun:latest
     container_name: diun
     command: serve
-    hostname: HexServer # server name
+    hostname: MyServer # Server name
     read_only: true
     volumes:
       - ./data:/data
@@ -14,13 +14,16 @@ services:
     environment:
       TZ: Europe/London
       DIUN_WATCH_WORKERS: 20
-      DIUN_WATCH_SCHEDULE: 0 8,20 * * *
+      DIUN_WATCH_SCHEDULE: 0 8,20 * * * # cron for check
       DIUN_WATCH_JITTER: 30s
       DIUN_PROVIDERS_DOCKER: "true"
       DIUN_PROVIDERS_DOCKER_WATCHBYDEFAULT: "true"
       DIUN_PROVIDERS_DOCKER_WATCHSTOPPED: "true"
-      DIUN_WATCH_HEALTHCHECKS_UUID: ${HEALTHCHECKS_UUID} # healthchecks.io in .env
-      DIUN_NOTIF_NTFY_ENDPOINT: ${NTFY_ENDPOINT} # ntfy settings in .env
+      DIUN_WATCH_FIRSTCHECKNOTIF: "false" # change to true for check on container start
+      DIUN_DEFAULTS_NOTIFYON: new,update # Notify on both new images and updates
+      DIUN_WATCH_HEALTHCHECKS_UUID: ${HEALTHCHECKS_UUID} # healthcheck.io
+      DIUN_WATCH_HEALTHCHECKS_BASEURL: ${HEALTHCHECKS_BASEURL}
+      DIUN_NOTIF_NTFY_ENDPOINT: ${NTFY_ENDPOINT} # ntfy for notifications
       DIUN_NOTIF_NTFY_TOPIC: ${NTFY_TOPIC}
       DIUN_NOTIF_NTFY_TOKEN: ${NTFY_TOKEN}
       DIUN_NOTIF_NTFY_PRIORITY: 3
@@ -32,6 +35,10 @@ services:
         Registry: {{ .Entry.Image.Domain }}
         Host: {{ .Meta.Hostname }}
         Status: {{ .Entry.Status }}
+      # Private registry authentication
+      DIUN_REGOPTS_0_NAME: ${PRIVATE_REG_URL}
+      DIUN_REGOPTS_0_USERNAME: ${PRIVATE_REG_USER}
+      DIUN_REGOPTS_0_PASSWORD: ${PRIVATE_REG_PASS}
     labels:
       - diun.enable=true
     restart: unless-stopped
