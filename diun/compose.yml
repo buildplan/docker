@@ -33,10 +33,16 @@ services:
       DIUN_NOTIF_NTFY_TIMEOUT: 10s
       DIUN_NOTIF_NTFY_TEMPLATETITLE: 🐳 [{{ .Meta.Hostname }}] {{ .Entry.Image }} update
       DIUN_NOTIF_NTFY_TEMPLATEBODY: |
-        📦 **{{ .Entry.Image }}** has an update available
-        Registry: {{ .Entry.Image.Domain }}
-        Host: {{ .Meta.Hostname }}
-        Status: {{ .Entry.Status }}
+        📦 **{{ .Entry.Image }}** {{ if (eq .Entry.Status "new") }}is now available{{ else }}has been updated{{ end }}
+        
+        🖥️ **Host:** {{ .Meta.Hostname }}
+        🌐 **Registry:** {{ .Entry.Image.Domain }}
+        📍 **Provider:** {{ .Entry.Provider }}
+        📅 **Created:** {{ .Entry.Manifest.Created }}
+        💻 **Platform:** {{ .Entry.Manifest.Platform }}
+        🔐 **Digest:** {{ .Entry.Manifest.Digest }}
+        {{ if .Entry.Image.HubLink }}
+        🔗 **Link:** {{ .Entry.Image.HubLink }}{{ end }}
       # Private registry authentication
       DIUN_REGOPTS_0_NAME: ${PRIVATE_REG_URL}
       DIUN_REGOPTS_0_USERNAME: ${PRIVATE_REG_USER}
