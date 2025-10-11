@@ -4,22 +4,62 @@ services:
     image: ghcr.io/crazy-max/diun:latest
     container_name: diun
     command: serve
+    hostname: HexServer # add hostname
+    read_only: true
     volumes:
       - ./data:/data
-      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    tmpfs:
+      - /tmp:size=64M,mode=1777
     environment:
       - TZ=Europe/London
       - DIUN_WATCH_WORKERS=20
-      - DIUN_WATCH_SCHEDULE=0 */6 * * *
+      - DIUN_WATCH_SCHEDULE=0 8,20 * * * # schedule for update checks
       - DIUN_WATCH_JITTER=30s
       - DIUN_PROVIDERS_DOCKER=true
       - DIUN_PROVIDERS_DOCKER_WATCHBYDEFAULT=true
-      - DIUN_NOTIF_NTFY_ENDPOINT=${NTFY_ENDPOINT}
+      - DIUN_PROVIDERS_DOCKER_WATCHSTOPPED=true
+      - DIUN_NOTIF_NTFY_ENDPOINT=${NTFY_ENDPOINT} # ntfy settings in .env
       - DIUN_NOTIF_NTFY_TOPIC=${NTFY_TOPIC}
       - DIUN_NOTIF_NTFY_TOKEN=${NTFY_TOKEN}
       - DIUN_NOTIF_NTFY_PRIORITY=3
       - DIUN_NOTIF_NTFY_TAGS=whale,package
       - DIUN_NOTIF_NTFY_TIMEOUT=10s
+      - DIUN_NOTIF_NTFY_TEMPLATETITLE=🐳 [{{ .Meta.Hostname }}] {{ .Entry.Image
+        }} update
+      - >-
+        DIUN_NOTIF_NTFY_TEMPLATEBODY=📦 **{{ .Entry.Image }}** has an update
+        available
+
+        Registry: {{ .Entry.Image.Domain }}
+
+        Host: {{ .Meta.Hostname }}
+
+        Status: {{ .Entry.Status }}
     labels:
       - diun.enable=true
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "2"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          memory: 128M
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD
+        - diun
+        - version
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+networks: {}
