@@ -36,11 +36,10 @@ log_message() {
     fi
 }
 
-# Sends a notification to ntfy
 send_notification_ntfy() {
     local title="$1"
     local message="$2"
-    local priority="${3:-default}" # Priority can be: low, default, high
+    local priority="${3:-3}" # Default=3
 
     if [ "$NTFY_ENABLED" != true ]; then
         return
@@ -64,7 +63,7 @@ send_notification_ntfy() {
         -H "Priority: $priority" \
         "${auth_args[@]}" \
         -d "$message (Host: $(hostname))" \
-        "$NTFY_SERVER/$NTFY_TOPIC" 2>/dev/null; then
+        "$NTFY_SERVER/$NTFY_TOPIC" &>/dev/null; then
         log_message "WARNING" "Failed to send ntfy notification."
     fi
 }
@@ -117,7 +116,7 @@ send_failure_notification() {
     local title="GeoLite2 Update FAILED"
     local discord_color=15158332 # Red
 
-    send_notification_ntfy "$title" "$message" "high"
+    send_notification_ntfy "$title" "$message" 4
     send_notification_discord "$title" "$message" "$discord_color"
 }
 
@@ -126,7 +125,7 @@ send_success_notification() {
     local title="GeoLite2 DB Updated"
     local discord_color=3066993 # Green
 
-    send_notification_ntfy "$title" "$message" "default"
+    send_notification_ntfy "$title" "$message" 3
     send_notification_discord "$title" "$message" "$discord_color"
 }
 
@@ -135,7 +134,7 @@ send_checkin_notification() {
     local title="GeoLite2 Check Complete"
     local discord_color=9807270 # Gray
 
-    send_notification_ntfy "$title" "$message" "low"
+    send_notification_ntfy "$title" "$message" 2
     send_notification_discord "$title" "$message" "$discord_color"
 }
 
