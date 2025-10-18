@@ -1,4 +1,6 @@
-## service
+## Service
+
+`geolite2-update.servivice`
 
 ```
 [Unit]
@@ -20,7 +22,9 @@ NoNewPrivileges=true
 TimeoutStartSec=600
 ```
 
-## timer
+## Timer
+
+`geolite2-update.timer`
 
 ```
 [Unit]
