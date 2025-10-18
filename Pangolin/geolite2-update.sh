@@ -136,7 +136,7 @@ send_notification_discord() {
         return
     fi
 
-    if [ "$DISCORD_WEBHOOK_URL" == "your_webhook_url_here" ] || [ -z "$DISCORD_WEBHOOK_URL" ]; then
+    if [ "$DISCORD_WEBHOOK_URL" == "discord_webhook_url_here" ] || [ -z "$DISCORD_WEBHOOK_URL" ]; then
         log_message "WARNING" "Discord notification enabled but DISCORD_WEBHOOK_URL is not set."
         return
     fi
