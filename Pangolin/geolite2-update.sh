@@ -17,7 +17,7 @@ set -euo pipefail
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 umask 077
 
-# --- Configuration (change these to suit your environment) ---
+# --- Configuration ---
 DEST_DIR="/path/to/your/config/" # <-- Change this to actual config directory.
 DB_FILENAME="GeoLite2-Country.mmdb" # Final db name.
 DOWNLOAD_URL="https://github.com/GitSquared/node-geolite2-redist/raw/refs/heads/master/redist/GeoLite2-Country.tar.gz"
@@ -27,12 +27,12 @@ LOG_MAX_LINES="500"
 # ntfy
 NTFY_ENABLED=false
 NTFY_TOPIC="your_ntfy_topic_here" # <-- Change this
-NTFY_SERVER="https://ntfy.sh"     # Default server
+NTFY_SERVER="https://ntfy.sh"     # Default server, change for self-hosted
 NTFY_TOKEN=""                     # <-- Add token if you use private topics
 
 # Discord
 DISCORD_ENABLED=false
-DISCORD_WEBHOOK_URL="your_webhook_url_here" # <-- Change this
+DISCORD_WEBHOOK_URL="discord_webhook_url_here" # <-- Change this
 
 # --- Internal defaults / runtime ---
 CURL_OPTS="--retry 3 --retry-delay 5 --retry-connrefused --connect-timeout 10 --max-time 300"
@@ -455,6 +455,7 @@ if [ "$UPDATE_NEEDED" = true ]; then
     # Optional: restart services that rely on the DB
     # log_message "INFO" "Restarting dependent service..."
     # systemctl restart myservice || true
+    # or docker compose restart service, etc.
 else
     log_message "INFO" "Update check complete. No new version found."
     send_checkin_notification "Database is already up-to-date. No action needed."
