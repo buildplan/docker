@@ -18,6 +18,7 @@ LOG_FILE="/var/log/geolite2-update.log" # Log file path
 NTFY_ENABLED=false
 NTFY_TOPIC="your_ntfy_topic_here" # <-- Change this
 NTFY_SERVER="https://ntfy.sh"     # Default server
+NTFY_TOKEN=""                     # <-- Add token
 
 # Discord
 DISCORD_ENABLED=false
@@ -35,6 +36,7 @@ log_message() {
     fi
 }
 
+# Sends a notification to ntfy
 send_notification_ntfy() {
     local title="$1"
     local message="$2"
@@ -49,12 +51,18 @@ send_notification_ntfy() {
         return
     fi
 
+    local auth_args=()
+    if [ -n "$NTFY_TOKEN" ]; then
+        auth_args=(-H "Authorization: Bearer $NTFY_TOKEN")
+    fi
+
     log_message "INFO" "Sending ntfy notification to $NTFY_TOPIC..."
 
     if ! curl -LsSf \
         -H "Title: $title" \
         -H "Tags: database" \
         -H "Priority: $priority" \
+        "${auth_args[@]}" \
         -d "$message (Host: $(hostname))" \
         "$NTFY_SERVER/$NTFY_TOPIC" 2>/dev/null; then
         log_message "WARNING" "Failed to send ntfy notification."
