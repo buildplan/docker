@@ -6,10 +6,6 @@
 # the node-geolite2-redist GitHub repository, downloads it if it's newer,
 # places it in a specified directory, and sends notifications on success/failure.
 #
-# Requirements: curl, tar, find, sha256sum, chown, chmod, mv, jq (optional unless Discord enabled)
-#
-# Usage: Configure the DEST_DIR variable and notification settings, then run the script.
-#
 # Requirements: curl, tar, find, mv, cp, (sha256sum OR shasum), chown, chmod. jq only required for Discord.
 # Usage: Configure DEST_DIR and notification settings, then run the script.
 # Example systemd cron: Wed/Sat at 06:30, (systemd example: https://github.com/buildplan/docker/blob/main/Pangolin/geolite-systemd.md)
