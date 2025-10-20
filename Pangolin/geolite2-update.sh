@@ -7,29 +7,52 @@
 # places it in a specified directory, and sends notifications on success/failure.
 #
 # Requirements: curl, tar, find, mv, cp, (sha256sum OR shasum), chown, chmod. jq only required for Discord.
-# Usage: Configure DEST_DIR and notification settings, then run the script.
+# Usage: Configure DEST_DIR and notification settings or create a geolite2.env and add:
+# -----
+# Path to geolite2 DB
+# export DEST_DIR="/path/to/your/config/"
+#
+# Enable ntfy
+# export NTFY_ENABLED=true
+# Set the secrets
+# export NTFY_TOPIC="your-topic"
+# export NTFY_SERVER="https://ntfy.self-host.url"
+# export NTFY_TOKEN="tk_..."
+#
+# Enable Discord
+# export DISCORD_ENABLED=true
+# Set the secret
+# export DISCORD_WEBHOOK_URL="https://discord.com/api/..."
+# -----
+# set strict per missions to .env file chmod 600 /path/to/.secrets/geolite2.env
+# then run the script - ./geolite2-update.sh
 # Example systemd cron: Wed/Sat at 06:30, (systemd example: https://github.com/buildplan/docker/blob/main/Pangolin/geolite-systemd.md)
 # or crontab 30 6 * * 3,6 /path/to/geolite2-update.sh
 set -euo pipefail
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 umask 077
 
+# Get the physical directory of the script, resolving any symlinks
+SCRIPT_DIR=$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+# Path to secure env file.
+ENV_FILE="${SCRIPT_DIR}/geolite2.env"
+
 # --- Configuration ---
-DEST_DIR="/path/to/your/config/" # <-- Change this to actual config directory.
+DEST_DIR="${DEST_DIR:-/path/to/your/config/}" # <-- Change this to actual config directory.
 DB_FILENAME="GeoLite2-Country.mmdb" # Final db name.
 DOWNLOAD_URL="https://github.com/GitSquared/node-geolite2-redist/raw/refs/heads/master/redist/GeoLite2-Country.tar.gz"
-LOG_FILE="/var/log/geolite2-update.log" # Log file path (ensure writable by runner) or leave default and change below
+LOG_FILE="${SCRIPT_DIR}/geolite2-update.log" # Log file path (ensure writable by runner) or leave default and change below
 LOG_MAX_LINES="500"
 
 # ntfy
 NTFY_ENABLED=false
-NTFY_TOPIC="your_ntfy_topic_here" # <-- Change this
-NTFY_SERVER="https://ntfy.sh"     # Default server, change for self-hosted
-NTFY_TOKEN=""                     # <-- Add token if you use private topics
+NTFY_TOPIC="${NTFY_TOPIC:-ntfy_topic_here}"       # <-- Change this in .env
+NTFY_SERVER="${NTFY_SERVER:-https://ntfy.sh}"     # Default server, change for self-hosted
+NTFY_TOKEN="${NTFY_TOKEN:-}"                      # <-- Add token if you use private topics
 
 # Discord
 DISCORD_ENABLED=false
-DISCORD_WEBHOOK_URL="discord_webhook_url_here" # <-- Change this
+DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-webhook_url_here}" # <-- Change this
 
 # --- Internal defaults / runtime ---
 CURL_OPTS="--retry 3 --retry-delay 5 --retry-connrefused --connect-timeout 10 --max-time 300"
@@ -71,9 +94,9 @@ filesize() {
 compute_sha256() {
     local file="$1"
     if command -v sha256sum >/dev/null 2>&1; then
-        sha256sum "$file" | awk '{print $1}'
+        run_cpu sha256sum "$file" | awk '{print $1}'
     else
-        shasum -a 256 "$file" | awk '{print $1}'
+        run_cpu shasum -a 256 "$file" | awk '{print $1}'
     fi
 }
 
@@ -84,9 +107,16 @@ log_message() {
     ts="$(date '+%Y-%m-%d %H:%M:%S')"
     # Try append to LOG_FILE, fallback to stdout if not writable
     echo "${ts} [${level}] - ${message}" | tee -a "$LOG_FILE" 2>/dev/null || echo "${ts} [${level}] - ${message}"
+
     if command -v systemd-cat > /dev/null 2>&1; then
-        # portable lowercase via tr
-        echo "$message" | systemd-cat -t "geolite2-update" -p "$(echo "$level" | tr '[:upper:]' '[:lower:]')" || true
+        local syslog_level="info" # default
+        case "$level" in
+            SUCCESS) syslog_level="notice" ;;
+            INFO)    syslog_level="info" ;;
+            WARNING) syslog_level="warning" ;;
+            ERROR)   syslog_level="err" ;;
+        esac
+        echo "$message" | systemd-cat -t "geolite2-update" -p "$syslog_level" || true
     fi
 }
 
@@ -100,7 +130,7 @@ send_notification_ntfy() {
         return
     fi
 
-    if [ "$NTFY_TOPIC" == "your_ntfy_topic_here" ] || [ -z "$NTFY_TOPIC" ]; then
+    if [ "$NTFY_TOPIC" == "ntfy_topic_here" ] || [ -z "$NTFY_TOPIC" ]; then
         log_message "WARNING" "ntfy notification is enabled but NTFY_TOPIC is not set."
         return
     fi
@@ -133,7 +163,7 @@ send_notification_discord() {
         return
     fi
 
-    if [ "$DISCORD_WEBHOOK_URL" == "discord_webhook_url_here" ] || [ -z "$DISCORD_WEBHOOK_URL" ]; then
+    if [ "$DISCORD_WEBHOOK_URL" == "webhook_url_here" ] || [ -z "$DISCORD_WEBHOOK_URL" ]; then
         log_message "WARNING" "Discord notification enabled but DISCORD_WEBHOOK_URL is not set."
         return
     fi
@@ -200,6 +230,7 @@ send_checkin_notification() {
     send_notification_discord "$title" "$message" "$discord_color"
 }
 
+# shellcheck disable=SC2329
 cleanup() {
     if [ -n "${TMP_DIR:-}" ] && [ -d "$TMP_DIR" ]; then
         rm -rf "$TMP_DIR" || true
@@ -211,9 +242,31 @@ cleanup() {
     fi
 }
 
+# Create temp dir early so logs can fall back to it
+TMP_DIR=$(mktemp -d)
+
+# If LOG_FILE not writable, fallback to tmp log
+if [ -e "$LOG_FILE" ] && [ ! -w "$LOG_FILE" ]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [WARNING] - Log file $LOG_FILE not writable. Using $TMP_DIR/geolite2-update.log instead."
+    LOG_FILE="$TMP_DIR/geolite2-update.log"
+elif [ ! -e "$LOG_FILE" ]; then
+    # Try to create it, or fall back to temp.
+    touch "$LOG_FILE" 2>/dev/null || LOG_FILE="$TMP_DIR/geolite2-update.log"
+fi
+
+# Truncate old log if too long
+if [ -f "$LOG_FILE" ] && [ "$(wc -l < "$LOG_FILE" 2>/dev/null || true)" -gt "$LOG_MAX_LINES" ]; then
+    tail -n "$LOG_MAX_LINES" "$LOG_FILE" > "${LOG_FILE}.tmp" && mv "${LOG_FILE}.tmp" "$LOG_FILE" || true
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] - Log file truncated to last $LOG_MAX_LINES lines." >> "$LOG_FILE" 2>/dev/null || true
+fi
+
 trap cleanup EXIT
 
+echo "" | tee -a "$LOG_FILE" 2>/dev/null || echo ""
+echo "==================== GeoLite2 Update Run Starting ====================" | tee -a "$LOG_FILE" 2>/dev/null || echo "=== Starting Run ==="
+
 log_message "INFO" "Starting GeoLite2 database update script."
+log_message "INFO" "Created temporary directory at $TMP_DIR"
 
 # --- Locking: create atomic lockdir (use /var/lock when writable) ---
 LOCK_BASE="/tmp"
@@ -228,6 +281,14 @@ if mkdir "$LOCK_DIR" 2>/dev/null; then
 else
     log_message "INFO" "Another instance appears to be running (lock exists at $LOCK_DIR). Exiting."
     exit 0
+fi
+
+# --- Load secrets from .env file if it exists ---
+if [ -f "$ENV_FILE" ]; then
+    log_message "INFO" "Loading secrets from $ENV_FILE"
+    . "$ENV_FILE"
+else
+    log_message "INFO" "No $ENV_FILE found, relying on pre-set environment variables."
 fi
 
 # --- Validate configuration and prerequisites ---
@@ -251,24 +312,6 @@ if [ ! -w "$DEST_DIR" ]; then
     exit 1
 fi
 
-# Create temp dir early
-TMP_DIR=$(mktemp -d)
-log_message "INFO" "Created temporary directory at $TMP_DIR"
-
-# If LOG_FILE not writable, fallback to tmp log
-if [ -e "$LOG_FILE" ] && [ ! -w "$LOG_FILE" ]; then
-    log_message "WARNING" "Log file $LOG_FILE is not writable. Using $TMP_DIR/geolite2-update.log instead."
-    LOG_FILE="$TMP_DIR/geolite2-update.log"
-elif [ ! -e "$LOG_FILE" ]; then
-    touch "$LOG_FILE" 2>/dev/null || LOG_FILE="$TMP_DIR/geolite2-update.log"
-fi
-
-# Truncate old log if too long
-if [ -f "$LOG_FILE" ] && [ "$(wc -l < "$LOG_FILE" 2>/dev/null || true)" -gt "$LOG_MAX_LINES" ]; then
-    tail -n "$LOG_MAX_LINES" "$LOG_FILE" > "${LOG_FILE}.tmp" && mv "${LOG_FILE}.tmp" "$LOG_FILE" || true
-    echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] - Log file truncated to last $LOG_MAX_LINES lines." >> "$LOG_FILE" 2>/dev/null || true
-fi
-
 # Basic required command checks
 for cmd in curl tar find mv cp; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -289,7 +332,7 @@ fi
 
 # Discord validation (if enabled)
 if [ "$DISCORD_ENABLED" = true ]; then
-    if [ "$DISCORD_WEBHOOK_URL" == "your_webhook_url_here" ] || [ -z "$DISCORD_WEBHOOK_URL" ]; then
+    if [ "$DISCORD_WEBHOOK_URL" == "webhook_url_here" ] || [ -z "$DISCORD_WEBHOOK_URL" ]; then
         err_msg="Discord is enabled but DISCORD_WEBHOOK_URL is not configured. Disabling Discord for this run."
         log_message "WARNING" "$err_msg"
         DISCORD_ENABLED=false
@@ -304,7 +347,7 @@ fi
 
 # ntfy validation (if enabled)
 if [ "$NTFY_ENABLED" = true ]; then
-    if [ "$NTFY_TOPIC" == "your_ntfy_topic_here" ] || [ -z "$NTFY_TOPIC" ]; then
+    if [ "$NTFY_TOPIC" == "ntfy_topic_here" ] || [ -z "$NTFY_TOPIC" ]; then
         err_msg="ntfy is enabled but NTFY_TOPIC is not configured. Disabling ntfy for this run."
         log_message "WARNING" "$err_msg"
         NTFY_ENABLED=false
@@ -320,7 +363,7 @@ if [ "$NTFY_ENABLED" = true ]; then
     fi
 fi
 
-# If Discord is enabled, ensure jq exists; if not, we already disabled above or we warn
+# If Discord is enabled, ensure jq exists
 if [ "$DISCORD_ENABLED" = true ] && ! command -v jq >/dev/null 2>&1; then
     log_message "WARNING" "jq not found; disabling Discord notifications for this run."
     DISCORD_ENABLED=false
