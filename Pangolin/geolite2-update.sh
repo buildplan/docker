@@ -89,9 +89,9 @@ filesize() {
 compute_sha256() {
     local file="$1"
     if command -v sha256sum >/dev/null 2>&1; then
-        sha256sum "$file" | awk '{print $1}'
+        run_cpu sha256sum "$file" | awk '{print $1}'
     else
-        shasum -a 256 "$file" | awk '{print $1}'
+        run_cpu shasum -a 256 "$file" | awk '{print $1}'
     fi
 }
 
