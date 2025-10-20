@@ -9,7 +9,7 @@
 # Requirements: curl, tar, find, mv, cp, (sha256sum OR shasum), chown, chmod. jq only required for Discord.
 # Usage: Configure DEST_DIR and notification settings or create a geolite2.env and add:
 # -----
-# GeoLite2 Update Configuration
+# GeoLite2 Update Configuration (example: https://github.com/buildplan/docker/blob/main/Pangolin/geolite2.env)
 # Set permissions: chmod 600 geolite2.env
 #
 # Required: Destination directory for database
