@@ -9,10 +9,14 @@
 # Requirements: curl, tar, find, mv, cp, (sha256sum OR shasum), chown, chmod. jq only required for Discord.
 # Usage: Configure DEST_DIR and notification settings or create a geolite2.env and add:
 # -----
+# Path to geolite2 DB
+# export DEST_DIR="/path/to/your/config/"
+#
 # Enable ntfy
 # export NTFY_ENABLED=true
 # Set the secrets
 # export NTFY_TOPIC="your-topic"
+# export NTFY_SERVER="https://ntfy.self-host.url"
 # export NTFY_TOKEN="tk_..."
 #
 # Enable Discord
