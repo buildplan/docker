@@ -84,9 +84,16 @@ log_message() {
     ts="$(date '+%Y-%m-%d %H:%M:%S')"
     # Try append to LOG_FILE, fallback to stdout if not writable
     echo "${ts} [${level}] - ${message}" | tee -a "$LOG_FILE" 2>/dev/null || echo "${ts} [${level}] - ${message}"
+    
     if command -v systemd-cat > /dev/null 2>&1; then
-        # portable lowercase via tr
-        echo "$message" | systemd-cat -t "geolite2-update" -p "$(echo "$level" | tr '[:upper:]' '[:lower:]')" || true
+        local syslog_level="info" # default
+        case "$level" in
+            SUCCESS) syslog_level="notice" ;;
+            INFO)    syslog_level="info" ;;
+            WARNING) syslog_level="warning" ;;
+            ERROR)   syslog_level="err" ;;
+        esac
+        echo "$message" | systemd-cat -t "geolite2-update" -p "$syslog_level" || true
     fi
 }
 
@@ -211,9 +218,31 @@ cleanup() {
     fi
 }
 
+# Create temp dir early so logs can fall back to it
+TMP_DIR=$(mktemp -d)
+
+# If LOG_FILE not writable, fallback to tmp log
+if [ -e "$LOG_FILE" ] && [ ! -w "$LOG_FILE" ]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [WARNING] - Log file $LOG_FILE not writable. Using $TMP_DIR/geolite2-update.log instead."
+    LOG_FILE="$TMP_DIR/geolite2-update.log"
+elif [ ! -e "$LOG_FILE" ]; then
+    # Try to create it, or fall back to temp.
+    touch "$LOG_FILE" 2>/dev/null || LOG_FILE="$TMP_DIR/geolite2-update.log"
+fi
+
+# Truncate old log if too long
+if [ -f "$LOG_FILE" ] && [ "$(wc -l < "$LOG_FILE" 2>/dev/null || true)" -gt "$LOG_MAX_LINES" ]; then
+    tail -n "$LOG_MAX_LINES" "$LOG_FILE" > "${LOG_FILE}.tmp" && mv "${LOG_FILE}.tmp" "$LOG_FILE" || true
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] - Log file truncated to last $LOG_MAX_LINES lines." >> "$LOG_FILE" 2>/dev/null || true
+fi
+
 trap cleanup EXIT
 
+echo "" | tee -a "$LOG_FILE" 2>/dev/null || echo ""
+echo "==================== GeoLite2 Update Run Starting ====================" | tee -a "$LOG_FILE" 2>/dev/null || echo "=== Starting Run ==="
+
 log_message "INFO" "Starting GeoLite2 database update script."
+log_message "INFO" "Created temporary directory at $TMP_DIR"
 
 # --- Locking: create atomic lockdir (use /var/lock when writable) ---
 LOCK_BASE="/tmp"
@@ -249,24 +278,6 @@ if [ ! -w "$DEST_DIR" ]; then
     log_message "ERROR" "$err_msg"
     send_failure_notification "$err_msg"
     exit 1
-fi
-
-# Create temp dir early
-TMP_DIR=$(mktemp -d)
-log_message "INFO" "Created temporary directory at $TMP_DIR"
-
-# If LOG_FILE not writable, fallback to tmp log
-if [ -e "$LOG_FILE" ] && [ ! -w "$LOG_FILE" ]; then
-    log_message "WARNING" "Log file $LOG_FILE is not writable. Using $TMP_DIR/geolite2-update.log instead."
-    LOG_FILE="$TMP_DIR/geolite2-update.log"
-elif [ ! -e "$LOG_FILE" ]; then
-    touch "$LOG_FILE" 2>/dev/null || LOG_FILE="$TMP_DIR/geolite2-update.log"
-fi
-
-# Truncate old log if too long
-if [ -f "$LOG_FILE" ] && [ "$(wc -l < "$LOG_FILE" 2>/dev/null || true)" -gt "$LOG_MAX_LINES" ]; then
-    tail -n "$LOG_MAX_LINES" "$LOG_FILE" > "${LOG_FILE}.tmp" && mv "${LOG_FILE}.tmp" "$LOG_FILE" || true
-    echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] - Log file truncated to last $LOG_MAX_LINES lines." >> "$LOG_FILE" 2>/dev/null || true
 fi
 
 # Basic required command checks
@@ -320,7 +331,7 @@ if [ "$NTFY_ENABLED" = true ]; then
     fi
 fi
 
-# If Discord is enabled, ensure jq exists; if not, we already disabled above or we warn
+# If Discord is enabled, ensure jq exists
 if [ "$DISCORD_ENABLED" = true ] && ! command -v jq >/dev/null 2>&1; then
     log_message "WARNING" "jq not found; disabling Discord notifications for this run."
     DISCORD_ENABLED=false
@@ -392,8 +403,10 @@ if [ ! -f "$EXISTING_DB_PATH" ]; then
     UPDATE_NEEDED=true
 else
     log_message "INFO" "Existing database found. Computing hashes..."
-    EXISTING_HASH=$(compute_sha256 "$EXISTING_DB_PATH")
-    NEW_HASH=$(compute_sha256 "$NEW_DB_PATH")
+    
+    EXISTING_HASH=$(run_cpu compute_sha256 "$EXISTING_DB_PATH")
+    NEW_HASH=$(run_cpu compute_sha256 "$NEW_DB_PATH")
+    
     log_message "INFO" "Existing DB hash: $EXISTING_HASH"
     log_message "INFO" "New DB hash:     $NEW_HASH"
     if [ "$EXISTING_HASH" != "$NEW_HASH" ]; then
