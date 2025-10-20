@@ -429,10 +429,10 @@ if [ ! -f "$EXISTING_DB_PATH" ]; then
     UPDATE_NEEDED=true
 else
     log_message "INFO" "Existing database found. Computing hashes..."
-    
-    EXISTING_HASH=$(run_cpu compute_sha256 "$EXISTING_DB_PATH")
-    NEW_HASH=$(run_cpu compute_sha256 "$NEW_DB_PATH")
-    
+
+    EXISTING_HASH=$(compute_sha256 "$EXISTING_DB_PATH")
+    NEW_HASH=$(compute_sha256 "$NEW_DB_PATH")
+
     log_message "INFO" "Existing DB hash: $EXISTING_HASH"
     log_message "INFO" "New DB hash:     $NEW_HASH"
     if [ "$EXISTING_HASH" != "$NEW_HASH" ]; then
