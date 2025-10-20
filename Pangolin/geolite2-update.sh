@@ -27,15 +27,16 @@
 set -euo pipefail
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 umask 077
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 
 # Path to secure environment file.
-ENV_FILE="/path/to/.secrets/geolite2.env"
+ENV_FILE="${SCRIPT_DIR}/geolite2.env"
 
 # --- Configuration ---
 DEST_DIR="${DEST_DIR:-/path/to/your/config/}" # <-- Change this to actual config directory.
 DB_FILENAME="GeoLite2-Country.mmdb" # Final db name.
 DOWNLOAD_URL="https://github.com/GitSquared/node-geolite2-redist/raw/refs/heads/master/redist/GeoLite2-Country.tar.gz"
-LOG_FILE="/var/log/geolite2-update.log" # Log file path (ensure writable by runner) or leave default and change below
+LOG_FILE="${SCRIPT_DIR}/geolite2-update.log" # Log file path (ensure writable by runner) or leave default and change below
 LOG_MAX_LINES="500"
 
 # ntfy
