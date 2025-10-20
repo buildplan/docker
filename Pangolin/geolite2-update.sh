@@ -229,7 +229,7 @@ send_checkin_notification() {
     send_notification_discord "$title" "$message" "$discord_color"
 }
 
-# shellcheck disable=SC2154
+# shellcheck disable=SC2329
 cleanup() {
     if [ -n "${TMP_DIR:-}" ] && [ -d "$TMP_DIR" ]; then
         rm -rf "$TMP_DIR" || true
