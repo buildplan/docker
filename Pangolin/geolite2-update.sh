@@ -106,7 +106,7 @@ log_message() {
     ts="$(date '+%Y-%m-%d %H:%M:%S')"
     # Try append to LOG_FILE, fallback to stdout if not writable
     echo "${ts} [${level}] - ${message}" | tee -a "$LOG_FILE" 2>/dev/null || echo "${ts} [${level}] - ${message}"
-    
+
     if command -v systemd-cat > /dev/null 2>&1; then
         local syslog_level="info" # default
         case "$level" in
@@ -229,6 +229,7 @@ send_checkin_notification() {
     send_notification_discord "$title" "$message" "$discord_color"
 }
 
+# shellcheck disable=SC2154
 cleanup() {
     if [ -n "${TMP_DIR:-}" ] && [ -d "$TMP_DIR" ]; then
         rm -rf "$TMP_DIR" || true
