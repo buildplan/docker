@@ -9,19 +9,20 @@
 # Requirements: curl, tar, find, mv, cp, (sha256sum OR shasum), chown, chmod. jq only required for Discord.
 # Usage: Configure DEST_DIR and notification settings or create a geolite2.env and add:
 # -----
-# Path to geolite2 DB
-# export DEST_DIR="/path/to/your/config/"
+# GeoLite2 Update Configuration
+# Set permissions: chmod 600 geolite2.env
 #
-# Enable ntfy
+# Required: Destination directory for database
+# export DEST_DIR="/var/lib/geoip"
+#
+# Optional: Enable ntfy notifications
 # export NTFY_ENABLED=true
-# Set the secrets
-# export NTFY_TOPIC="your-topic"
+# export NTFY_TOPIC="geolite2-updates"
 # export NTFY_SERVER="https://ntfy.self-host.url"
-# export NTFY_TOKEN="tk_..."
+# export NTFY_TOKEN="tk_..."  # Bearer token for private topics
 #
-# Enable Discord
-# export DISCORD_ENABLED=true
-# Set the secret
+# Optional: Enable Discord notifications
+# export DISCORD_ENABLED=false
 # export DISCORD_WEBHOOK_URL="https://discord.com/api/..."
 # -----
 # set strict per missions to .env file chmod 600 /path/to/.secrets/geolite2.env
@@ -268,19 +269,47 @@ echo "==================== GeoLite2 Update Run Starting ====================" | 
 log_message "INFO" "Starting GeoLite2 database update script."
 log_message "INFO" "Created temporary directory at $TMP_DIR"
 
-# --- Locking: create atomic lockdir (use /var/lock when writable) ---
+# --- Locking: create atomic lockdir with stale lock detection ---
 LOCK_BASE="/tmp"
 if [ -w /var/lock ]; then
     LOCK_BASE="/var/lock"
 fi
 LOCK_DIR="${LOCK_BASE}/geolite2-update.lock"
-if mkdir "$LOCK_DIR" 2>/dev/null; then
+
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    if [ -f "${LOCK_DIR}/pid" ]; then
+        old_pid=$(cat "${LOCK_DIR}/pid" 2>/dev/null || echo "")
+        if [ -n "$old_pid" ] && ! kill -0 "$old_pid" 2>/dev/null; then
+            log_message "WARNING" "Removing stale lock (PID $old_pid no longer exists)"
+            rm -rf "$LOCK_DIR" || true
+            if mkdir "$LOCK_DIR" 2>/dev/null; then
+                LOCK_CREATED=true
+                echo "$$" > "${LOCK_DIR}/pid"
+                log_message "INFO" "Acquired lock after removing stale lock: $LOCK_DIR"
+            else
+                log_message "ERROR" "Failed to acquire lock even after stale lock removal"
+                exit 1
+            fi
+        else
+            log_message "INFO" "Another instance is running (PID $old_pid). Exiting."
+            exit 0
+        fi
+    else
+        log_message "WARNING" "Lock directory exists but no PID file found. Attempting cleanup."
+        rm -rf "$LOCK_DIR" || true
+        if mkdir "$LOCK_DIR" 2>/dev/null; then
+            LOCK_CREATED=true
+            echo "$$" > "${LOCK_DIR}/pid"
+            log_message "INFO" "Acquired lock after cleaning orphaned lock directory"
+        else
+            log_message "ERROR" "Failed to acquire lock"
+            exit 1
+        fi
+    fi
+else
     LOCK_CREATED=true
     echo "$$" > "${LOCK_DIR}/pid"
     log_message "INFO" "Acquired lock: $LOCK_DIR"
-else
-    log_message "INFO" "Another instance appears to be running (lock exists at $LOCK_DIR). Exiting."
-    exit 0
 fi
 
 # --- Load secrets from .env file if it exists ---
@@ -336,7 +365,7 @@ if [ "$DISCORD_ENABLED" = true ]; then
         err_msg="Discord is enabled but DISCORD_WEBHOOK_URL is not configured. Disabling Discord for this run."
         log_message "WARNING" "$err_msg"
         DISCORD_ENABLED=false
-    elif [[ ! "$DISCORD_WEBHOOK_URL" =~ ^https://discord(app)?\.com/api/webhooks/[0-9]+/[A-Za-z0-9_-]+$ ]]; then
+    elif [[ "$DISCORD_WEBHOOK_URL" =~ ^https://(canary\.|ptb\.)?discord(app)?\.com/api/webhooks/[0-9]+/[A-Za-z0-9_-]+$ ]]; then
         err_msg="DISCORD_WEBHOOK_URL does not appear to be a valid Discord webhook URL. Disabling Discord for this run."
         log_message "WARNING" "$err_msg"
         DISCORD_ENABLED=false
