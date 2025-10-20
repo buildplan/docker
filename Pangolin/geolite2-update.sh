@@ -7,15 +7,32 @@
 # places it in a specified directory, and sends notifications on success/failure.
 #
 # Requirements: curl, tar, find, mv, cp, (sha256sum OR shasum), chown, chmod. jq only required for Discord.
-# Usage: Configure DEST_DIR and notification settings, then run the script.
+# Usage: Configure DEST_DIR and notification settings or create a geolite2.env and add:
+# -----
+# Enable ntfy
+# export NTFY_ENABLED=true
+# Set the secrets
+# export NTFY_TOPIC="your-topic"
+# export NTFY_TOKEN="tk_..."
+#
+# Enable Discord
+# export DISCORD_ENABLED=true
+# Set the secret
+# export DISCORD_WEBHOOK_URL="https://discord.com/api/..."
+# -----
+# set strict per missions to .env file chmod 600 /path/to/.secrets/geolite2.env
+# then run the script - ./geolite2-update.sh
 # Example systemd cron: Wed/Sat at 06:30, (systemd example: https://github.com/buildplan/docker/blob/main/Pangolin/geolite-systemd.md)
 # or crontab 30 6 * * 3,6 /path/to/geolite2-update.sh
 set -euo pipefail
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 umask 077
 
+# Path to secure environment file.
+ENV_FILE="/path/to/.secrets/geolite2.env"
+
 # --- Configuration ---
-DEST_DIR="/path/to/your/config/" # <-- Change this to actual config directory.
+DEST_DIR="${DEST_DIR:-/path/to/your/config/}" # <-- Change this to actual config directory.
 DB_FILENAME="GeoLite2-Country.mmdb" # Final db name.
 DOWNLOAD_URL="https://github.com/GitSquared/node-geolite2-redist/raw/refs/heads/master/redist/GeoLite2-Country.tar.gz"
 LOG_FILE="/var/log/geolite2-update.log" # Log file path (ensure writable by runner) or leave default and change below
@@ -23,13 +40,13 @@ LOG_MAX_LINES="500"
 
 # ntfy
 NTFY_ENABLED=false
-NTFY_TOPIC="your_ntfy_topic_here" # <-- Change this
-NTFY_SERVER="https://ntfy.sh"     # Default server, change for self-hosted
-NTFY_TOKEN=""                     # <-- Add token if you use private topics
+NTFY_TOPIC="${NTFY_TOPIC:-ntfy_topic_here}"       # <-- Change this in .env
+NTFY_SERVER="${NTFY_SERVER:-https://ntfy.sh}"     # Default server, change for self-hosted
+NTFY_TOKEN="${NTFY_TOKEN:-}"                      # <-- Add token if you use private topics
 
 # Discord
 DISCORD_ENABLED=false
-DISCORD_WEBHOOK_URL="discord_webhook_url_here" # <-- Change this
+DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-webhook_url_here}" # <-- Change this
 
 # --- Internal defaults / runtime ---
 CURL_OPTS="--retry 3 --retry-delay 5 --retry-connrefused --connect-timeout 10 --max-time 300"
@@ -107,7 +124,7 @@ send_notification_ntfy() {
         return
     fi
 
-    if [ "$NTFY_TOPIC" == "your_ntfy_topic_here" ] || [ -z "$NTFY_TOPIC" ]; then
+    if [ "$NTFY_TOPIC" == "ntfy_topic_here" ] || [ -z "$NTFY_TOPIC" ]; then
         log_message "WARNING" "ntfy notification is enabled but NTFY_TOPIC is not set."
         return
     fi
@@ -140,7 +157,7 @@ send_notification_discord() {
         return
     fi
 
-    if [ "$DISCORD_WEBHOOK_URL" == "discord_webhook_url_here" ] || [ -z "$DISCORD_WEBHOOK_URL" ]; then
+    if [ "$DISCORD_WEBHOOK_URL" == "webhook_url_here" ] || [ -z "$DISCORD_WEBHOOK_URL" ]; then
         log_message "WARNING" "Discord notification enabled but DISCORD_WEBHOOK_URL is not set."
         return
     fi
@@ -259,6 +276,14 @@ else
     exit 0
 fi
 
+# --- Load secrets from .env file if it exists ---
+if [ -f "$ENV_FILE" ]; then
+    log_message "INFO" "Loading secrets from $ENV_FILE"
+    . "$ENV_FILE"
+else
+    log_message "INFO" "No $ENV_FILE found, relying on pre-set environment variables."
+fi
+
 # --- Validate configuration and prerequisites ---
 if [[ "$DEST_DIR" == "/path/to/your/config/" ]]; then
     err_msg="Configuration needed: Set DEST_DIR variable to your actual config directory."
@@ -300,7 +325,7 @@ fi
 
 # Discord validation (if enabled)
 if [ "$DISCORD_ENABLED" = true ]; then
-    if [ "$DISCORD_WEBHOOK_URL" == "your_webhook_url_here" ] || [ -z "$DISCORD_WEBHOOK_URL" ]; then
+    if [ "$DISCORD_WEBHOOK_URL" == "webhook_url_here" ] || [ -z "$DISCORD_WEBHOOK_URL" ]; then
         err_msg="Discord is enabled but DISCORD_WEBHOOK_URL is not configured. Disabling Discord for this run."
         log_message "WARNING" "$err_msg"
         DISCORD_ENABLED=false
@@ -315,7 +340,7 @@ fi
 
 # ntfy validation (if enabled)
 if [ "$NTFY_ENABLED" = true ]; then
-    if [ "$NTFY_TOPIC" == "your_ntfy_topic_here" ] || [ -z "$NTFY_TOPIC" ]; then
+    if [ "$NTFY_TOPIC" == "ntfy_topic_here" ] || [ -z "$NTFY_TOPIC" ]; then
         err_msg="ntfy is enabled but NTFY_TOPIC is not configured. Disabling ntfy for this run."
         log_message "WARNING" "$err_msg"
         NTFY_ENABLED=false
