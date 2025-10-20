@@ -31,9 +31,10 @@
 set -euo pipefail
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 umask 077
-SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 
-# Path to secure environment file.
+# Get the physical directory of the script, resolving any symlinks
+SCRIPT_DIR=$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+# Path to secure env file.
 ENV_FILE="${SCRIPT_DIR}/geolite2.env"
 
 # --- Configuration ---
