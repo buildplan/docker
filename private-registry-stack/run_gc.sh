@@ -122,16 +122,14 @@ format_gc_results() {
     local for_notification="$2"  # true/false
 
     # Extract summary stats
-    local blobs_marked blobs_eligible manifests_eligible
+    local blobs_marked blobs_eligible
     blobs_marked=$(echo "$gc_output" | grep -o '[0-9]\+ blobs marked' | head -1)
     blobs_eligible=$(echo "$gc_output" | grep -o '[0-9]\+ blobs and [0-9]\+ manifests' | head -1)
-    manifests_eligible=$(echo "$gc_output" | grep -o '[0-9]\+ manifests eligible' | head -1)
 
     # Build summary
     local summary_parts=()
     [[ -n "$blobs_marked" ]] && summary_parts+=("$blobs_marked")
     [[ -n "$blobs_eligible" ]] && summary_parts+=("$blobs_eligible")
-    [[ -n "$manifests_eligible" ]] && [[ "$manifests_eligible" != *"$blobs_eligible"* ]] && summary_parts+=("$manifests_eligible")
 
     local summary
     if [[ ${#summary_parts[@]} -gt 0 ]]; then
