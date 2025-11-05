@@ -122,16 +122,18 @@ format_gc_results() {
     local for_notification="$2"  # true/false
 
     # Extract summary stats
-    local blobs_marked=$(echo "$gc_output" | grep -o '[0-9]\+ blobs marked' | head -1)
-    local blobs_eligible=$(echo "$gc_output" | grep -o '[0-9]\+ blobs.*eligible' | head -1)
-    local manifests_eligible=$(echo "$gc_output" | grep -o '[0-9]\+ manifests eligible' | head -1)
-
+    local blobs_marked blobs_eligible manifests_eligible
+    blobs_marked=$(echo "$gc_output" | grep -o '[0-9]\+ blobs marked' | head -1)
+    blobs_eligible=$(echo "$gc_output" | grep -o '[0-9]\+ blobs.*eligible' | head -1)
+    manifests_eligible=$(echo "$gc_output" | grep -o '[0-9]\+ manifests eligible' | head -1)
     # Build summary
     local summary_parts=()
     [[ -n "$blobs_marked" ]] && summary_parts+=("$blobs_marked")
-    [[ -n "$blobs_eligible" ]] && summary_parts+=("$blobs_eligible")
-    [[ -n "$manifests_eligible" ]] && summary_parts+=("$manifests_eligible")
+    if [[ -n "$blobs_eligible" ]] && [[ "$blobs_eligible" != "$blobs_marked" ]]; then
+        summary_parts+=("$blobs_eligible")
+    fi
 
+    [[ -n "$manifests_eligible" ]] && summary_parts+=("$manifests_eligible")
     local summary
     if [[ ${#summary_parts[@]} -gt 0 ]]; then
         summary=$(IFS=' | '; echo "${summary_parts[*]}")
@@ -140,9 +142,9 @@ format_gc_results() {
     fi
 
     # Handle deletion details differently for notifications vs terminal
-    local deletions
+    local deletions deletion_count
     deletions=$(echo "$gc_output" | grep "Deleting" | head -20)
-    local deletion_count=$(echo "$gc_output" | grep -c "Deleting" || echo "0")
+    deletion_count=$(echo "$gc_output" | grep -c "Deleting" || echo "0")
     if [[ "$for_notification" == "true" ]]; then
 
         # NOTIFICATION VERSION - Clean and concise
