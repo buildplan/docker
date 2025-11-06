@@ -12,11 +12,9 @@ services:
     restart: unless-stopped
     security_opt: [no-new-privileges:true] # Security hardening
     ports: ["80:80", "443:443"] # Expose HTTP and HTTPS ports
-    # Pass all variables from .env file into this container's environment
-    # This allows Traefik's YML configs to use {$VAR_NAME} syntax.
     env_file: .env
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro # To listen to Docker events for service discovery
+      - /var/run/docker.sock:/var/run/docker.sock:ro # To listen Docker events for service discovery
       - ./traefik_config/traefik.yml:/etc/traefik/traefik.yml:ro # Static config
       - ./traefik_config/dynamic:/etc/traefik/dynamic_conf:ro  # Directory for dynamic .yml files
       - ./traefik_certs:/traefik_certs # Persist Let's Encrypt SSL certificates
@@ -24,8 +22,8 @@ services:
     networks:
       - auth_net
     labels:
-      - "traefik.enable=true" # Enable Traefik for itself (for dashboard)
-      # Traefik Dashboard Router - secured with basic auth from dynamic config
+      - "traefik.enable=true" # Enable Traefik dashboard
+      # Traefik Dashboard Router - secured with authentik
       - "traefik.http.routers.traefik-dashboard.rule=Host(`${TRAEFIK_DASHBOARD_HOSTNAME}`)" # Reads from container env
       - "traefik.http.routers.traefik-dashboard.entrypoints=websecure"
       - "traefik.http.routers.traefik-dashboard.service=api@internal" # Internal Traefik API service
@@ -55,20 +53,6 @@ services:
       driver: "json-file"
       options: { max-size: "10m", max-file: "2" }
 
-  # --- valkey ---
-  valkey:
-    image: docker.io/valkey/valkey:${VALKEY_TAG} # From .env
-    container_name: ${COMPOSE_PROJECT_NAME}_valkey
-    restart: unless-stopped
-    command: ["valkey-server", "--save", "60 1", "--loglevel", "warning"] # Basic persistence & logging
-    volumes: ["./valkey_data:/data"] # Persistent data
-    healthcheck: { test: ["CMD", "valkey-cli", "ping"], interval: 10s, timeout: 5s, retries: 5, start_period: 20s }
-    networks:
-      - auth_net
-    logging:
-      driver: "json-file"
-      options: { max-size: "5m", max-file: "2" }
-
   # --- authentik server ---
   authentik-server:
     image: ghcr.io/goauthentik/server:${AUTHENTIK_TAG} # From .env
@@ -81,13 +65,11 @@ services:
       AUTHENTIK_POSTGRESQL__USER: ${POSTGRES_USER} # Interpolated by Docker Compose
       AUTHENTIK_POSTGRESQL__NAME: ${POSTGRES_DB}   # Interpolated by Docker Compose
       AUTHENTIK_POSTGRESQL__PASSWORD: ${POSTGRES_PASSWORD} # Interpolated by Docker Compose
-      AUTHENTIK_REDIS__HOST: valkey # Authentik uses 'REDIS' vars for Valkey due to client compatibility
     volumes:
       - ./authentik_media:/media
       - ./authentik_templates:/templates
     depends_on:
       postgresql: { condition: service_healthy }
-      valkey: { condition: service_healthy }
     networks:
       - auth_net
     logging:
@@ -114,13 +96,11 @@ services:
       AUTHENTIK_POSTGRESQL__USER: ${POSTGRES_USER}
       AUTHENTIK_POSTGRESQL__NAME: ${POSTGRES_DB}
       AUTHENTIK_POSTGRESQL__PASSWORD: ${POSTGRES_PASSWORD}
-      AUTHENTIK_REDIS__HOST: valkey
     volumes:
       - ./authentik_media:/media # If worker needs media access
       - ./authentik_templates:/templates
     depends_on:
       postgresql: { condition: service_healthy }
-      valkey: { condition: service_healthy }
       authentik-server: { condition: service_started }
     networks:
       - auth_net
@@ -130,7 +110,7 @@ services:
 
   # --- crowdsec ---
   crowdsec:
-    image: crowdsecurity/crowdsec:${CROWDSEC_TAG}
+    image: crowdsecurity/crowdsec:${CROWDSEC_TAG:-latest} #from .env
     container_name: crowdsec
     restart: unless-stopped
     networks:
@@ -141,9 +121,10 @@ services:
       - "8080"
     environment:
       TZ: Europe/London
-      COLLECTIONS: crowdsecurity/traefik firix/authentik crowdsecurity/appsec-virtual-patching crowdsecurity/appsec-generic-rules crowdsecurity/linux
+      COLLECTIONS: ${CROWDSEC_COLLECTIONS} # added in .env
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/log/kern.log:/var/log/host_kern.log:ro
       - /var/log/auth.log:/var/log/host_auth.log:ro
       - /var/log/syslog:/var/log/host_syslog:ro
       - /var/log/ufw.log:/var/log/host_ufw.log:ro
