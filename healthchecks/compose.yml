@@ -2,8 +2,6 @@ services:
   healthchecks:
     image: lscr.io/linuxserver/healthchecks:latest
     container_name: healthchecks
-    networks:
-      - newt-net
     environment:
       - PUID=${PID}
       - PGID=${PID}
