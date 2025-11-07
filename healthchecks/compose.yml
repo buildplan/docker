@@ -1,39 +1,43 @@
+name: healthchecks
 services:
-  healthchecks:
-    image: lscr.io/linuxserver/healthchecks:latest
-    container_name: healthchecks
-    environment:
-      - PUID=${PID}
-      - PGID=${PID}
-      - TZ=${TZ}
-      - SITE_ROOT=${SITE_ROOT}
-      - SITE_NAME=${SITE_NAME}
-      - SUPERUSER_EMAIL=${SUPERUSER_EMAIL}
-      - SUPERUSER_PASSWORD=${SUPERUSER_PASSWORD}
-      - ADMINS=${SUPERUSER_EMAIL}
-      - RP_ID=${RP_ID}
-      - REGISTRATION_OPEN=False
-      - APPRISE_ENABLED=True
-      - DEBUG=False
-      - DEFAULT_FROM_EMAIL=${DEFAULT_FROM_EMAIL}
-      - EMAIL_HOST=${EMAIL_HOST}
-      - EMAIL_PORT=${EMAIL_PORT}
-      - EMAIL_HOST_USER=${EMAIL_HOST_USER}
-      - EMAIL_HOST_PASSWORD=${EMAIL_HOST_PASSWORD}
-      - EMAIL_USE_TLS=True
-      - PING_EMAIL_DOMAIN=${PING_EMAIL_DOMAIN}
-      - SECRET_KEY=${SECRET_KEY}
-      - SITE_LOGO_URL=${SITE_LOGO_URL}
-      - PING_BODY_LIMIT=20000
-    volumes:
-      - ./config:/config
-    ports:
-      - 127.0.0.1:8899:8000
-      # - 2929:2525 #optional
-    restart: unless-stopped
-    logging:
-      driver: "json-file"
-      options: { max-size: "10m", max-file: "3" }
-    deploy:
-      resources:
-        limits: { cpus: '0.50', memory: 512M }
+    healthchecks:
+        image: lscr.io/linuxserver/healthchecks:latest
+        container_name: healthchecks
+        environment:
+            - PUID=${PID}
+            - PGID=${PID}
+            - TZ=${TZ}
+            - SITE_ROOT=${SITE_ROOT}
+            - SITE_NAME=${SITE_NAME}
+            - SUPERUSER_EMAIL=${SUPERUSER_EMAIL}
+            - SUPERUSER_PASSWORD=${SUPERUSER_PASSWORD}
+            - ADMINS=${SUPERUSER_EMAIL}
+            - RP_ID=${RP_ID}
+            - REGISTRATION_OPEN=False
+            - APPRISE_ENABLED=True
+            - DEBUG=False
+            - DEFAULT_FROM_EMAIL=${DEFAULT_FROM_EMAIL}
+            - EMAIL_HOST=${EMAIL_HOST}
+            - EMAIL_PORT=${EMAIL_PORT}
+            - EMAIL_HOST_USER=${EMAIL_HOST_USER}
+            - EMAIL_HOST_PASSWORD=${EMAIL_HOST_PASSWORD}
+            - EMAIL_USE_TLS=True
+            - PING_EMAIL_DOMAIN=${PING_EMAIL_DOMAIN}
+            - SECRET_KEY=${SECRET_KEY}
+            - SITE_LOGO_URL=${SITE_LOGO_URL}
+            - PING_BODY_LIMIT=20000
+        volumes:
+            - ./config:/config
+        ports:
+            - 127.0.0.1:8899:8000
+        restart: unless-stopped
+        logging:
+            driver: json-file
+            options:
+                max-size: 10m
+                max-file: "3"
+        deploy:
+            resources:
+                limits:
+                    cpus: "0.50"
+                    memory: 512M
