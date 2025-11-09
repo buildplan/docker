@@ -19,6 +19,28 @@ if [[ $EUID -ne 0 ]]; then
    exit 1
 fi
 
+# Check if systemctl is available
+if ! command -v systemctl &> /dev/null; then
+    echo "✗ systemctl is required but not found. This script is for systemd-based systems."
+    exit 1
+fi
+
+# Check if docker is available
+if ! command -v docker &> /dev/null; then
+    echo "✗ docker is required but not installed."
+    exit 1
+fi
+
+# Check if Docker daemon is running
+if ! systemctl is-active --quiet docker; then
+    echo "⚠ Docker daemon is not currently running"
+    echo "Attempting to start Docker..."
+    systemctl start docker || {
+        echo "✗ Failed to start Docker daemon"
+        exit 1
+    }
+fi
+
 # Check if python3 is available
 if ! command -v python3 &> /dev/null; then
     echo "✗ python3 is required but not installed"
