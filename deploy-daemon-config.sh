@@ -164,6 +164,7 @@ fi
 echo ""
 echo "--- Testing network allocation (should be 172.80.x.0/24) ---"
 if docker network create test-net > /dev/null 2>&1; then
+    sleep 2
     if docker network inspect test-net | grep -q "172.80."; then
         echo "✓ Network allocation test PASSED"
         docker network inspect test-net | grep "Subnet" || true
