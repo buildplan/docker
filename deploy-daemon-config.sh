@@ -151,24 +151,33 @@ echo ""
 echo "--- Verifying settings ---"
 
 echo "Checking Logging Driver:"
-docker info | grep "Logging Driver"
+docker info | grep "Logging Driver" || echo "  (Unable to verify logging driver)"
 
 echo "Checking Live Restore:"
-docker info | grep "Live Restore"
+docker info | grep "Live Restore" || echo "  (Unable to verify live restore)"
 
 echo "Checking Default Address Pools:"
-docker info | grep -A 3 "Default Address Pools"
+# Use JSON format for reliable parsing
+ADDRESS_POOLS=$(docker info --format '{{json .DefaultAddressPools}}' 2>/dev/null || echo "null")
+if [[ "$ADDRESS_POOLS" != "null" && -n "$ADDRESS_POOLS" ]]; then
+    echo "$ADDRESS_POOLS" | python3 -m json.tool
+else
+    echo "  (Default address pools not displayed by docker info)"
+    echo "  Checking daemon.json directly:"
+    grep -A 5 "default-address-pools" "$DAEMON_JSON" || echo "  (Unable to verify)"
+fi
 
 # --- Verification Step 3: Test Network Allocation ---
 echo ""
 echo "--- Testing network allocation (should be 172.80.x.0/24) ---"
 if docker network create test-net > /dev/null 2>&1; then
-    if docker network inspect test-net | grep -q "172.80."; then
+    SUBNET=$(docker network inspect test-net --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}' 2>/dev/null)
+    
+    if [[ "$SUBNET" =~ ^172\.80\. ]]; then
         echo "✓ Network allocation test PASSED"
-        docker network inspect test-net | grep "Subnet"
+        echo "  Subnet: $SUBNET"
     else
-        echo "⚠ Network allocation test: Subnet is not in the 172.80.0.0/16 range"
-        docker network inspect test-net | grep "Subnet"
+        echo "⚠ Network allocation: Subnet is $SUBNET (not in 172.80.0.0/16 range)"
         echo "  (Existing networks will keep old ranges; only new networks use new pool)"
     fi
     docker network rm test-net > /dev/null 2>&1
