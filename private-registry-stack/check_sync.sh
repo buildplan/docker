@@ -9,7 +9,7 @@
 #              logging and notifications via ntfy.
 #
 # buildplan.org
-# 06-10-2025
+# 10-11-2025
 # ==============================================================================
 
 # --- PURPOSE ---
@@ -88,8 +88,6 @@
 #
 # ==============================================================================
 
-set -euo pipefail
-
 # ==============================================================================
 # Configuration
 # ==============================================================================
@@ -103,6 +101,12 @@ STATE_FILE="${LOG_DIR}/.check_sync_state"
 NTFY_URL=$(<"${SECRETS_DIR}/ntfy_url")
 NTFY_TOPIC=$(<"${SECRETS_DIR}/ntfy_topic")
 NTFY_TOKEN_FILE="${SECRETS_DIR}/ntfy_token"
+
+HC_URL_FILE="${SECRETS_DIR}/cs_hc_url"
+HC_URL=""
+if [[ -f "${HC_URL_FILE}" ]]; then
+    HC_URL=$(<"${HC_URL_FILE}")
+fi
 
 HOSTNAME=$(hostname -s)
 HUB_USER_FILE="${SECRETS_DIR}/hub_user"
@@ -140,6 +144,26 @@ send_ntfy() {
     -H "Title: ${title}" -H "Priority: ${priority}" -H "Tags: ${tags}" \
     -d "${message}" \
     "${NTFY_URL}/${NTFY_TOPIC}" &
+}
+
+ping_healthcheck() {
+    local endpoint="$1"
+    [[ -z "${HC_URL}" ]] && return 0
+    if ! curl -fsS -m 10 --retry 3 "${HC_URL}${endpoint}" > /dev/null 2>&1; then
+        warn "Failed to ping Healthchecks.io endpoint: ${endpoint}"
+        return 1
+    fi
+    return 0
+}
+# shellcheck disable=SC2329
+cleanup_and_report() {
+    local final_exit_code=$?
+    [[ -z "${HC_URL}" ]] && return
+    if [[ $final_exit_code -eq 0 ]]; then
+        ping_healthcheck ""
+    else
+        ping_healthcheck "/${final_exit_code}"
+    fi
 }
 
 # ==============================================================================
@@ -289,6 +313,10 @@ run_regsync_with_retry() {
 # ==============================================================================
 main() {
   mkdir -p "${LOG_DIR}"
+
+  # Set up exit trap for Healthchecks.io reporting
+  trap cleanup_and_report EXIT
+  ping_healthcheck "/start"
 
   # Config validation
   [[ -r "${COMPOSE_FILE}" ]] || { error "Missing compose file: ${COMPOSE_FILE}"; exit 1; }
