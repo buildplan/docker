@@ -14,8 +14,19 @@ DAEMON_JSON="/etc/docker/daemon.json"
 TEMP_DAEMON_JSON="/tmp/daemon.json.$$"
 BACKUP_FILE=""
 
-# Clean up temporary file on exit
-trap 'rm -f "$TEMP_DAEMON_JSON"' EXIT
+# Clean up temporary file on exit and provide helpful messages
+cleanup() {
+    local exit_code=$?
+    rm -f "$TEMP_DAEMON_JSON"
+    
+    if [[ $exit_code -ne 0 && -n "$BACKUP_FILE" && -f "$BACKUP_FILE" ]]; then
+        echo ""
+        echo "⚠ Script exited with errors. Backup saved at: $BACKUP_FILE"
+        echo "  To restore manually: sudo cp $BACKUP_FILE $DAEMON_JSON && sudo systemctl restart docker"
+    fi
+}
+
+trap cleanup EXIT
 
 # Check if running as root
 if [[ $EUID -ne 0 ]]; then
@@ -85,9 +96,9 @@ EOF
 
 # --- Validation Step 1: Python JSON Syntax Check ---
 echo "Validating JSON syntax..."
-if ! cat "$TEMP_DAEMON_JSON" | python3 -m json.tool > /dev/null 2>&1; then
+if ! python3 -m json.tool "$TEMP_DAEMON_JSON" > /dev/null 2>&1; then
     echo "✗ Invalid JSON syntax! Aborting."
-    cat "$TEMP_DAEMON_JSON" | python3 -m json.tool
+    python3 -m json.tool "$TEMP_DAEMON_JSON"
     exit 1
 fi
 echo "✓ JSON syntax is valid"
@@ -105,53 +116,65 @@ echo ""
 # --- Apply Configuration ---
 echo "Applying new configuration..."
 mv "$TEMP_DAEMON_JSON" "$DAEMON_JSON"
-chmod 644 "$DAEMON_JSON"
+chmod 600 "$DAEMON_JSON"
 
 echo "Reloading Docker daemon..."
 systemctl reload docker
 
-# --- Verification Step 1: Check if Docker is Active ---
-if systemctl is-active --quiet docker; then
-    echo "✓ Docker daemon reloaded successfully"
-    echo ""
-    
-    # --- Verification Step 2: Check Specific Settings ---
-    echo "--- Verifying settings ---"
-    
-    echo "Checking Logging Driver:"
-    docker info | grep "Logging Driver"
-    
-    echo "Checking Live Restore:"
-    docker info | grep "Live Restore"
-    
-    echo "Checking Default Address Pools:"
-    docker info | grep -A 3 "Default Address Pools"
-    
-    # --- Verification Step 3: Test Network Allocation ---
-    echo "--- Testing network allocation (should be 172.80.x.0/24) ---"
-    if docker network create test-net > /dev/null 2>&1; then
-        if docker network inspect test-net | grep -q "172.80."; then
-            echo "✓ Network allocation test PASSED"
-            docker network inspect test-net | grep "Subnet"
-        else
-            echo "✗ Network allocation test FAILED: Subnet is not in the 172.80.0.0/16 range."
-            docker network inspect test-net | grep "Subnet"
-        fi
-        docker network rm test-net > /dev/null
-    else
-        echo "✗ Failed to create test network for verification"
-    fi
-    echo "----------------------------"
+# Give Docker a moment to apply configuration
+sleep 2
 
-else
-    # --- Automatic Rollback ---
-    echo "✗ Docker failed to reload! Restoring backup..."
+# --- Verification Step 1: Check if Docker is Active and Healthy ---
+if ! systemctl is-active --quiet docker || ! docker info &>/dev/null; then
+    echo "✗ Docker is unhealthy after reload! Restoring backup..."
+    
     if [[ -n "$BACKUP_FILE" && -f "$BACKUP_FILE" ]]; then
         cp "$BACKUP_FILE" "$DAEMON_JSON"
-        systemctl restart docker
-        echo "✓ Backup restored and Docker restarted"
+        chmod 600 "$DAEMON_JSON"
+        systemctl restart docker  # Full restart for clean state after rollback
+        
+        if systemctl is-active --quiet docker; then
+            echo "✓ Backup restored and Docker restarted successfully"
+        else
+            echo "✗ Docker failed to start even after rollback!"
+        fi
     else
         echo "✗ No backup file found! Docker may be in a failed state."
     fi
     exit 1
 fi
+
+echo "✓ Docker daemon reloaded successfully"
+echo ""
+
+# --- Verification Step 2: Check Specific Settings ---
+echo "--- Verifying settings ---"
+
+echo "Checking Logging Driver:"
+docker info | grep "Logging Driver"
+
+echo "Checking Live Restore:"
+docker info | grep "Live Restore"
+
+echo "Checking Default Address Pools:"
+docker info | grep -A 3 "Default Address Pools"
+
+# --- Verification Step 3: Test Network Allocation ---
+echo ""
+echo "--- Testing network allocation (should be 172.80.x.0/24) ---"
+if docker network create test-net > /dev/null 2>&1; then
+    if docker network inspect test-net | grep -q "172.80."; then
+        echo "✓ Network allocation test PASSED"
+        docker network inspect test-net | grep "Subnet"
+    else
+        echo "⚠ Network allocation test: Subnet is not in the 172.80.0.0/16 range"
+        docker network inspect test-net | grep "Subnet"
+        echo "  (Existing networks will keep old ranges; only new networks use new pool)"
+    fi
+    docker network rm test-net > /dev/null 2>&1
+else
+    echo "✗ Failed to create test network for verification"
+fi
+echo "----------------------------"
+echo ""
+echo "✓ Deployment complete!"
