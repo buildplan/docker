@@ -184,7 +184,7 @@ if docker network create test-net > /dev/null 2>&1; then
     done
     if [[ "$allocated" == "true" ]]; then
         echo "✓ Network allocation test PASSED"
-        echo "          \"Subnet\": \"$subnet\","
+        echo "  Subnet: $subnet"
     else
         echo "⚠ Network allocation test: Subnet is not in the 172.80.0.0/16 range"
         docker network inspect test-net | grep "Subnet" || true
