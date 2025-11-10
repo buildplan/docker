@@ -14,7 +14,7 @@ DAEMON_JSON="/etc/docker/daemon.json"
 TEMP_DAEMON_JSON="/tmp/daemon.json.$$"
 BACKUP_FILE=""
 
-# Clean up temporary file on exit and provide helpful messages
+# Clean up temporary file on exit
 cleanup() {
     local exit_code=$?
     rm -f "$TEMP_DAEMON_JSON"
