@@ -18,7 +18,6 @@ BACKUP_FILE=""
 cleanup() {
     local exit_code=$?
     rm -f "$TEMP_DAEMON_JSON"
-    
     if [[ $exit_code -ne 0 && -n "$BACKUP_FILE" && -f "$BACKUP_FILE" ]]; then
         echo ""
         echo "⚠ Script exited with errors. Backup saved at: $BACKUP_FILE"
@@ -127,12 +126,10 @@ sleep 2
 # --- Verification Step 1: Check if Docker is Active and Healthy ---
 if ! systemctl is-active --quiet docker || ! docker info &>/dev/null; then
     echo "✗ Docker is unhealthy after restart! Restoring backup..."
-    
     if [[ -n "$BACKUP_FILE" && -f "$BACKUP_FILE" ]]; then
         cp "$BACKUP_FILE" "$DAEMON_JSON"
         chmod 600 "$DAEMON_JSON"
         systemctl restart docker  # Full restart for clean state after rollback
-        
         if systemctl is-active --quiet docker; then
             echo "✓ Backup restored and Docker restarted successfully"
         else
@@ -157,7 +154,11 @@ echo "Checking Live Restore:"
 docker info | grep "Live Restore" || true
 
 echo "Checking Default Address Pools:"
-docker info | grep -A 3 "Default Address Pools" || true
+if docker info | grep -A 3 "Default Address Pools"; then
+    :  # grep succeeded, output is shown
+else
+    echo "  (Not displayed in docker info, but configured in daemon.json)"
+fi
 
 # --- Verification Step 3: Test Network Allocation ---
 echo ""
