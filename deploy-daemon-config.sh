@@ -118,15 +118,15 @@ echo "Applying new configuration..."
 mv "$TEMP_DAEMON_JSON" "$DAEMON_JSON"
 chmod 600 "$DAEMON_JSON"
 
-echo "Reloading Docker daemon..."
-systemctl reload docker
+echo "Restarting Docker daemon (safe with live-restore)..."
+systemctl restart docker
 
 # Give Docker a moment to apply configuration
 sleep 2
 
 # --- Verification Step 1: Check if Docker is Active and Healthy ---
 if ! systemctl is-active --quiet docker || ! docker info &>/dev/null; then
-    echo "✗ Docker is unhealthy after reload! Restoring backup..."
+    echo "✗ Docker is unhealthy after restart! Restoring backup..."
     
     if [[ -n "$BACKUP_FILE" && -f "$BACKUP_FILE" ]]; then
         cp "$BACKUP_FILE" "$DAEMON_JSON"
@@ -144,40 +144,31 @@ if ! systemctl is-active --quiet docker || ! docker info &>/dev/null; then
     exit 1
 fi
 
-echo "✓ Docker daemon reloaded successfully"
+echo "✓ Docker daemon restarted successfully"
 echo ""
 
 # --- Verification Step 2: Check Specific Settings ---
 echo "--- Verifying settings ---"
 
 echo "Checking Logging Driver:"
-docker info | grep "Logging Driver" || echo "  (Unable to verify logging driver)"
+docker info | grep "Logging Driver" || true
 
 echo "Checking Live Restore:"
-docker info | grep "Live Restore" || echo "  (Unable to verify live restore)"
+docker info | grep "Live Restore" || true
 
 echo "Checking Default Address Pools:"
-# Use JSON format for reliable parsing
-ADDRESS_POOLS=$(docker info --format '{{json .DefaultAddressPools}}' 2>/dev/null || echo "null")
-if [[ "$ADDRESS_POOLS" != "null" && -n "$ADDRESS_POOLS" ]]; then
-    echo "$ADDRESS_POOLS" | python3 -m json.tool
-else
-    echo "  (Default address pools not displayed by docker info)"
-    echo "  Checking daemon.json directly:"
-    grep -A 5 "default-address-pools" "$DAEMON_JSON" || echo "  (Unable to verify)"
-fi
+docker info | grep -A 3 "Default Address Pools" || true
 
 # --- Verification Step 3: Test Network Allocation ---
 echo ""
 echo "--- Testing network allocation (should be 172.80.x.0/24) ---"
 if docker network create test-net > /dev/null 2>&1; then
-    SUBNET=$(docker network inspect test-net --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}' 2>/dev/null)
-    
-    if [[ "$SUBNET" =~ ^172\.80\. ]]; then
+    if docker network inspect test-net | grep -q "172.80."; then
         echo "✓ Network allocation test PASSED"
-        echo "  Subnet: $SUBNET"
+        docker network inspect test-net | grep "Subnet" || true
     else
-        echo "⚠ Network allocation: Subnet is $SUBNET (not in 172.80.0.0/16 range)"
+        echo "⚠ Network allocation test: Subnet is not in the 172.80.0.0/16 range"
+        docker network inspect test-net | grep "Subnet" || true
         echo "  (Existing networks will keep old ranges; only new networks use new pool)"
     fi
     docker network rm test-net > /dev/null 2>&1
