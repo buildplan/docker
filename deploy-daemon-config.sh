@@ -3,8 +3,7 @@
 # Deploys Docker daemon.json with safe validation
 #
 # Usage:
-#   curl -LO https://raw.githubusercontent.com/buildplan/docker/refs/heads/main/deploy-daemon-config.sh
-#   less deploy-daemon-config.sh  # Review the script
+#   https://raw.githubusercontent.com/buildplan/docker/refs/heads/main/deploy-daemon-config.sh
 #   chmod +x deploy-daemon-config.sh
 #   sudo ./deploy-daemon-config.sh
 
