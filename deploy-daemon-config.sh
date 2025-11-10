@@ -114,6 +114,13 @@ echo ""
 
 # --- Apply Configuration ---
 echo "Applying new configuration..."
+
+# Ensure /etc/docker directory exists
+if [[ ! -d "/etc/docker" ]]; then
+    echo "Creating /etc/docker directory..."
+    mkdir -p /etc/docker
+fi
+
 mv "$TEMP_DAEMON_JSON" "$DAEMON_JSON"
 chmod 600 "$DAEMON_JSON"
 
