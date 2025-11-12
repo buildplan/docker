@@ -122,7 +122,7 @@ if [[ ! -d "/etc/docker" ]]; then
 fi
 
 mv "$TEMP_DAEMON_JSON" "$DAEMON_JSON"
-chmod 600 "$DAEMON_JSON"
+chmod 644 "$DAEMON_JSON"
 
 echo "Restarting Docker daemon (safe with live-restore)..."
 systemctl restart docker
