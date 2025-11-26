@@ -8,6 +8,11 @@ SECRETS_DIR="${SCRIPT_DIR}/secrets"
 NTFY_URL=$(<"${SECRETS_DIR}/ntfy_url")
 NTFY_TOPIC=$(<"${SECRETS_DIR}/ntfy_topic")
 NTFY_TOKEN_FILE="${SECRETS_DIR}/ntfy_token"
+HC_URL_FILE="${SECRETS_DIR}/gc_hc_url"
+HC_URL=""
+if [[ -f "${HC_URL_FILE}" ]]; then
+    HC_URL=$(<"${HC_URL_FILE}")
+fi
 REGISTRY_CONTAINER="registry" # Name of registry container
 REGISTRY_CONFIG="/etc/distribution/config.yml"
 LOG_DIR="${SCRIPT_DIR}/logs"
@@ -117,6 +122,25 @@ send_ntfy() {
     return 0
 }
 
+ping_healthcheck() {
+    local endpoint="$1"
+    [[ -z "${HC_URL}" ]] && return 0
+    if ! curl -fsS -m 10 --retry 3 "${HC_URL}${endpoint}" > /dev/null 2>&1; then
+        log "Warning: Failed to ping Healthchecks.io"
+        return 1
+    fi
+    return 0
+}
+cleanup_and_report() {
+    local final_exit_code=$?
+    [[ -z "${HC_URL}" ]] && return
+    if [[ $final_exit_code -eq 0 ]]; then
+        ping_healthcheck ""
+    else
+        ping_healthcheck "/${final_exit_code}"
+    fi
+}
+
 format_gc_results() {
     local gc_output="$1"
     local for_notification="$2"  # true/false
@@ -141,7 +165,7 @@ format_gc_results() {
     # Handle deletion details differently for notifications vs terminal
     local deletions deletion_count
     deletions=$(echo "$gc_output" | grep "Deleting" | head -20)
-    deletion_count=$(echo "$gc_output" | grep -c "Deleting" || echo "0")
+    deletion_count=$(grep -c "Deleting" <<< "$gc_output" || true)
     if [[ "$for_notification" == "true" ]]; then
 
         # NOTIFICATION VERSION - Clean and concise
@@ -213,6 +237,10 @@ parse_arguments() {
 main() {
     cd "${SCRIPT_DIR}"
     mkdir -p "${LOG_DIR}"
+
+    # Trap for Healthchecks.io and start reporting
+    trap cleanup_and_report EXIT
+    ping_healthcheck "/start"
 
     # Read ntfy token
     if [[ -f "${NTFY_TOKEN_FILE}" ]]; then
