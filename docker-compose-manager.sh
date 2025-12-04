@@ -31,6 +31,7 @@ exit_code=0
 DRY_RUN=0
 
 # --- Signal handling for clean exit ---
+# shellcheck disable=SC2329
 cleanup() {
     printf '\n%bInterrupted. Exiting.%b\n' "${YELLOW}" "${RESET}"
     exit 130
