@@ -99,6 +99,7 @@ run_compose_in_dir() {
     dir="${1%/}"
 
     if [ ! -d "$dir" ]; then
+        printf '%b------------------------------------------------%b\n' "${MAGENTA}" "${RESET}"
         printf '%bError:%b directory %b%s%b does not exist... skipping.\n' \
             "${RED}" "${RESET}" "${CYAN}" "'$dir'" "${RESET}" >&2
         return 1
@@ -244,6 +245,7 @@ for dir in "$BASE_DIR"/*/; do
     folder_name=$(basename "$dir")
 
     if is_excluded "$folder_name"; then
+        printf '%b------------------------------------------------%b\n' "${MAGENTA}" "${RESET}"
         printf '%bSkipping excluded folder:%b %b%s%b\n' \
             "${YELLOW}" "${RESET}" "${CYAN}" "$folder_name" "${RESET}"
         continue
