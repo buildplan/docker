@@ -6,10 +6,10 @@
 #
 
 set -eu
-( set -o pipefail 2>/dev/null ) && set -o pipefail 2>/dev/null || :
+( set -o pipefail ) 2>/dev/null && set -o pipefail 2>/dev/null || :
 
 SCRIPT_NAME=$(basename "$0")
-VERSION="0.2.0"
+VERSION="0.3.0"
 
 # --- Terminal color support detection ---
 if [ -t 1 ]; then
@@ -29,6 +29,8 @@ fi
 found_any=0
 exit_code=0
 DRY_RUN=0
+FAILED_DIRS=""
+SUCCESS_DIRS=""
 
 # --- Signal handling for clean exit ---
 # shellcheck disable=SC2329
@@ -39,10 +41,18 @@ cleanup() {
 trap cleanup INT TERM
 
 # --- Dependency check ---
-if ! command -v docker >/dev/null 2>&1; then
-    printf '%bError:%b %s\n' "${RED}" "${RESET}" "docker is not installed or not in PATH." >&2
-    exit 1
-fi
+check_dependency() {
+    if ! command -v docker >/dev/null 2>&1; then
+        printf '%bError:%b %s\n' "${RED}" "${RESET}" "docker is not installed or not in PATH." >&2
+        exit 1
+    fi
+
+    if ! docker compose version >/dev/null 2>&1; then
+        printf '%bError:%b %s\n' "${RED}" "${RESET}" \
+            "'docker compose' not available. Install Docker Compose v2 (plugin) or enable the compose plugin." >&2
+        exit 1
+    fi
+}
 
 # --- Help and version ---
 print_help() {
@@ -54,8 +64,8 @@ print_help() {
     printf '%b%bDescription:%b\n' "${BOLD}" "${CYAN}" "${RESET}"
     cat <<'EOF'
   Run 'docker compose' (up/down/restart/status) in one or more directories.
-  Each target directory may have multiple compose files.
-  All detected files in a directory are passed with multiple -f flags.
+  Detects standard compose files (compose.yml, docker-compose.yml)
+  and pattern-based files (compose-*.yml, docker-compose-*.yml) and merges them.
 EOF
 
     printf '\n%b%bOptions:%b\n' "${BOLD}" "${CYAN}" "${RESET}"
@@ -97,6 +107,8 @@ is_excluded() {
 # --- Core: run compose in a directory ---
 run_compose_in_dir() {
     dir="${1%/}"
+    folder_name=$(basename "$dir")
+    cmd_success=0
 
     if [ ! -d "$dir" ]; then
         printf '%b------------------------------------------------%b\n' "${MAGENTA}" "${RESET}"
@@ -107,19 +119,15 @@ run_compose_in_dir() {
 
     set --
 
-    # 1. Core compose file names
-    for f in "docker-compose.yml" "docker-compose.yaml" "compose.yml" "compose.yaml"; do
-        if [ -f "$dir/$f" ]; then
-            set -- "$@" -f "$dir/$f"
-        fi
+    # 1. Standard priority files
+    for f in "compose.yml" "compose.yaml" "docker-compose.yml" "docker-compose.yaml"; do
+        if [ -f "$dir/$f" ]; then set -- "$@" -f "$dir/$f"; fi
     done
 
     # 2. Pattern-based compose files
     for f in "$dir"/docker-compose-*.yml "$dir"/docker-compose-*.yaml \
              "$dir"/compose-*.yml        "$dir"/compose-*.yaml; do
-        if [ -f "$f" ]; then
-            set -- "$@" -f "$f"
-        fi
+        if [ -f "$f" ]; then set -- "$@" -f "$f"; fi
     done
 
     if [ "$#" -eq 0 ]; then
@@ -127,29 +135,29 @@ run_compose_in_dir() {
     fi
 
     found_any=1
-    folder_name=$(basename "$dir")
 
     printf '%b------------------------------------------------%b\n' "${MAGENTA}" "${RESET}"
     printf '%b%bRunning:%b docker compose %b%s%b for %b%s%b\n' \
         "${BOLD}" "${BLUE}" "${RESET}" \
         "${GREEN}" "$ACTION" "${RESET}" \
         "${CYAN}" "$folder_name" "${RESET}"
-    printf '%b%bUsing files:%b\n' "${BOLD}" "${CYAN}" "${RESET}"
 
-    # Display files
-    for arg in "$@"; do
-        if [ "$arg" != "-f" ]; then
-            printf '  %b-%b %s\n' "${GREEN}" "${RESET}" "$(basename "$arg")"
-        fi
-    done
+    # Verbose file listing
+    if [ "$DRY_RUN" -eq 0 ]; then
+        printf '%b%bUsing files:%b ' "${BOLD}" "${CYAN}" "${RESET}"
+        for arg in "$@"; do
+            if [ "$arg" != "-f" ]; then printf '%s ' "$(basename "$arg")"; fi
+        done
+        printf '\n'
+    fi
 
     # Dry-run check
     if [ "$DRY_RUN" -eq 1 ]; then
         printf '%b[dry-run]%b ' "${YELLOW}" "${RESET}"
         case "$ACTION" in
-            up)      printf '%s\n' "docker compose $* up -d" ;;
-            down)    printf '%s\n' "docker compose $* down" ;;
-            restart) printf '%s\n' "docker compose $* down && docker compose $* up -d" ;;
+            up)      printf '%s\n' "docker compose $* up -d --remove-orphans" ;;
+            down)    printf '%s\n' "docker compose $* down --remove-orphans" ;;
+            restart) printf '%s\n' "docker compose $* down --remove-orphans && docker compose $* up -d --remove-orphans" ;;
             status)  printf '%s\n' "docker compose $* ps" ;;
         esac
         return 0
@@ -158,22 +166,30 @@ run_compose_in_dir() {
     # Execute
     case "$ACTION" in
         up)
-            if ! docker compose "$@" up -d --remove-orphans; then exit_code=1; fi
-            ;;
+            if docker compose "$@" up -d --remove-orphans; then cmd_success=1; fi ;;
         down)
-            if ! docker compose "$@" down --remove-orphans; then exit_code=1; fi
-            ;;
+            if docker compose "$@" down --remove-orphans; then cmd_success=1; fi ;;
+
         restart)
-            if ! docker compose "$@" down --remove-orphans; then exit_code=1; fi
-            if ! docker compose "$@" up -d --remove-orphans; then exit_code=1; fi
-            ;;
+            if docker compose "$@" down --remove-orphans; then
+                if docker compose "$@" up -d --remove-orphans; then cmd_success=1; fi
+            fi ;;
         status)
-            if ! docker compose "$@" ps; then exit_code=1; fi
-            ;;
+            if docker compose "$@" ps; then cmd_success=1; fi ;;
     esac
+
+    if [ "$cmd_success" -eq 1 ]; then
+        SUCCESS_DIRS="$SUCCESS_DIRS $folder_name"
+    else
+        printf '%bFailed to execute action for %s%b\n' "${RED}" "$folder_name" "${RESET}"
+        FAILED_DIRS="$FAILED_DIRS $folder_name"
+        exit_code=1
+    fi
 }
 
 # --- Argument parsing ---
+check_dependency
+
 ACTION=""
 EXCLUDES_INPUT=""
 
@@ -186,8 +202,7 @@ while [ "$#" -gt 0 ]; do
             printf '%bError:%b unknown option %b%s%b\n' \
                 "${RED}" "${RESET}" "${CYAN}" "'$1'" "${RESET}" >&2
             print_help
-            exit 1
-            ;;
+            exit 1 ;;
         *) break ;;
     esac
 done
@@ -219,43 +234,54 @@ if [ "$#" -gt 0 ]; then
     for name in "$@"; do
         run_compose_in_dir "$name" || true
     done
-    exit "$exit_code"
-fi
+else
+    # Interactive Directory Scan
+    printf '%b%bInteractive mode%b\n' "${BOLD}" "${CYAN}" "${RESET}"
+    printf 'Base directory to scan [%s]: ' "$(pwd)"
 
-# Interactive Directory Scan
-printf '%b%bInteractive mode%b\n' "${BOLD}" "${CYAN}" "${RESET}"
-printf 'Base directory to scan [%s]: ' "$(pwd)"
+    if ! IFS= read -r BASE_DIR; then exit 1; fi
+    if [ -z "$BASE_DIR" ]; then BASE_DIR=$(pwd); fi
 
-if ! IFS= read -r BASE_DIR; then exit 1; fi
-if [ -z "$BASE_DIR" ]; then BASE_DIR=$(pwd); fi
-
-if [ ! -d "$BASE_DIR" ]; then
-    printf '%bError:%b %b%s%b is not a directory.\n' \
-        "${RED}" "${RESET}" "${CYAN}" "'$BASE_DIR'" "${RESET}" >&2
-    exit 1
-fi
-
-printf 'Folders to exclude (space-separated names): '
-if ! IFS= read -r EXCLUDES_INPUT; then exit 1; fi
-
-for dir in "$BASE_DIR"/*/; do
-    [ -d "$dir" ] || continue
-
-    dir=${dir%/}
-    folder_name=$(basename "$dir")
-
-    if is_excluded "$folder_name"; then
-        printf '%b------------------------------------------------%b\n' "${MAGENTA}" "${RESET}"
-        printf '%bSkipping excluded folder:%b %b%s%b\n' \
-            "${YELLOW}" "${RESET}" "${CYAN}" "$folder_name" "${RESET}"
-        continue
+    if [ ! -d "$BASE_DIR" ]; then
+        printf '%bError:%b %b%s%b is not a directory.\n' \
+            "${RED}" "${RESET}" "${CYAN}" "'$BASE_DIR'" "${RESET}" >&2
+        exit 1
     fi
 
-    run_compose_in_dir "$dir" || true
-done
+    printf 'Folders to exclude (space-separated names): '
+    if ! IFS= read -r EXCLUDES_INPUT; then exit 1; fi
+
+    for dir in "$BASE_DIR"/*/; do
+        [ -d "$dir" ] || continue
+
+        dir=${dir%/}
+        folder_name=$(basename "$dir")
+
+        if is_excluded "$folder_name"; then
+            printf '%b------------------------------------------------%b\n' "${MAGENTA}" "${RESET}"
+            printf '%bSkipping excluded folder:%b %b%s%b\n' \
+                "${YELLOW}" "${RESET}" "${CYAN}" "$folder_name" "${RESET}"
+            continue
+        fi
+
+        run_compose_in_dir "$dir" || true
+    done
+fi
 
 if [ "$found_any" -eq 0 ]; then
     printf '\n%bNo subdirectories with compose files found.%b\n' "${YELLOW}" "${RESET}"
+else
+    printf '\n%b=== Execution Summary ===%b\n' "${BOLD}" "${RESET}"
+
+    if [ -n "$SUCCESS_DIRS" ]; then
+        SUCCESS_DIRS=${SUCCESS_DIRS# }
+        printf '%bSuccess:%b %s\n' "${GREEN}" "${RESET}" "$SUCCESS_DIRS"
+    fi
+
+    if [ -n "$FAILED_DIRS" ]; then
+        FAILED_DIRS=${FAILED_DIRS# }
+        printf '%bFailed:%b %s\n' "${RED}" "${RESET}" "$FAILED_DIRS"
+    fi
 fi
 
 exit "$exit_code"
