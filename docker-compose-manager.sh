@@ -3,7 +3,7 @@
 #
 # docker-compose-manager.sh - Manage Docker Compose projects across directories
 # POSIX-compliant utility for up/down/restart/status operations
-#
+# curl -LO https://raw.githubusercontent.com/buildplan/docker/refs/heads/main/docker-compose-manager.sh && chmod +x docker-compose-manager.sh
 
 set -eu
 ( set -o pipefail ) 2>/dev/null && set -o pipefail 2>/dev/null || :
