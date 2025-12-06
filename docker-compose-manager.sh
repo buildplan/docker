@@ -1,26 +1,25 @@
 #!/bin/sh
-# shellcheck shell=dash
+# shellcheck shell=sh
 #
 # docker-compose-manager.sh - Manage Docker Compose projects across directories
 # POSIX-compliant utility for up/down/restart/status operations
+# Download the script and make it executeable:
 # curl -LO https://raw.githubusercontent.com/buildplan/docker/refs/heads/main/docker-compose-manager.sh && chmod +x docker-compose-manager.sh
+#
 
 set -eu
+# shellcheck disable=SC3040
 ( set -o pipefail ) 2>/dev/null && set -o pipefail 2>/dev/null || :
 
+# Ensure standard sorting and character handling
+export LC_ALL=C
+
 SCRIPT_NAME=$(basename "$0")
-VERSION="0.3.0"
+VERSION="0.3.1"
 
 # --- Terminal color support detection ---
 if [ -t 1 ]; then
-    RED='\033[31m'
-    GREEN='\033[32m'
-    YELLOW='\033[33m'
-    BLUE='\033[34m'
-    MAGENTA='\033[35m'
-    CYAN='\033[36m'
-    BOLD='\033[1m'
-    RESET='\033[0m'
+    RED='\033[31m' GREEN='\033[32m' YELLOW='\033[33m' BLUE='\033[34m' MAGENTA='\033[35m' CYAN='\033[36m' BOLD='\033[1m' RESET='\033[0m'
 else
     RED='' GREEN='' YELLOW='' BLUE='' MAGENTA='' CYAN='' BOLD='' RESET=''
 fi
@@ -117,6 +116,7 @@ run_compose_in_dir() {
         return 1
     fi
 
+    # Clear positional arguments to build the file list
     set --
 
     # 1. Standard priority files
