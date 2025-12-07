@@ -41,22 +41,32 @@ $HOME/.local/share/Trash
 /var/lib/docker
 "
 
-# Build find(1) -path ... -prune expression from EXCLUDES
-build_prune_expr() {
-    for d in $EXCLUDES; do
-        printf ' -path %s -o -path %s -o' "$d" "$d/*"
-    done
-}
-
 # Replace tokens in files under SEARCH_PATHS
 for p in $SEARCH_PATHS; do
     [ -d "$p" ] || continue
 
-    # shellcheck disable=SC2046
-    find "$p" \
-        \( $(build_prune_expr | sed 's/ -o$//') \) -prune -o \
-        -type f ! -path '*/.git/*' -print |
-    while IFS= read -r f; do
+    # Build find command with proper -prune exclusions
+    find_cmd="find \"$p\""
+
+    # Add exclusions
+    first=1
+    for exclude in $EXCLUDES; do
+        if [ "$first" -eq 1 ]; then
+            find_cmd="$find_cmd \\( -path \"$exclude\" -o -path \"$exclude/*\""
+            first=0
+        else
+            find_cmd="$find_cmd -o -path \"$exclude\" -o -path \"$exclude/*\""
+        fi
+    done
+
+    if [ "$first" -eq 0 ]; then
+        find_cmd="$find_cmd \\) -prune -o"
+    fi
+
+    find_cmd="$find_cmd -type f ! -path '*/.git/*' -print"
+
+    # Execute find and process files
+    eval "$find_cmd" | while IFS= read -r f; do
         # Skip binary files; only edit files containing OLD token
         if grep -Iq "$OLD" "$f" 2>/dev/null && grep -q "$OLD" "$f" 2>/dev/null; then
             sed -i.bak "s/$OLD/$NEW/g" "$f"
