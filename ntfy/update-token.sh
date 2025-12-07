@@ -1,7 +1,6 @@
 #!/bin/sh
-
-# run it with:
-# sh update-token.sh "tk_old_token_here" "tk_new_token_here"
+# Usage:
+#   sh update-token.sh "tk_old_token_here" "tk_new_token_here"
 
 set -eu
 
@@ -14,43 +13,41 @@ $HOME
 /etc
 "
 
-# Directories to exclude (absolute paths or prefixes)
+# Directories to exclude (absolute paths)
+# Add/remove entries as needed
 EXCLUDES="
 $HOME/.cache
 $HOME/.local/share/Trash
 /var/lib/docker
+/home/ali/forgejo
 "
 
-is_excluded() {
-    p="$1"
-    for e in $EXCLUDES; do
-        case "$p" in
-            "$e"/*|"$e") return 0 ;;
-        esac
+# Build the find(1) -path ... -prune expression from EXCLUDES
+build_prune_expr() {
+    for d in $EXCLUDES; do
+        # Each dir excluded as dir itself and everything under it
+        printf ' -path %s -o -path %s -o' "$d" "$d/*"
     done
-    return 1
 }
 
 for p in $SEARCH_PATHS; do
     [ -d "$p" ] || continue
-    if is_excluded "$p"; then
-        continue
-    fi
-    find "$p" -type d | while IFS= read -r d; do
-        if is_excluded "$d"; then
-            continue
+
+    # shellcheck disable=SC2046
+    find "$p" \
+        \( $(build_prune_expr | sed 's/ -o$//') \) -prune -o \
+        -type f ! -path '*/.git/*' -print |
+    while IFS= read -r f; do
+        # Skip binary-ish files and only touch files that contain OLD
+        if grep -Iq "$OLD" "$f" 2>/dev/null && grep -q "$OLD" "$f" 2>/dev/null; then
+            sed -i.bak "s/$OLD/$NEW/g" "$f"
+            printf 'Updated %s\n' "$f"
         fi
-        find "$d" -maxdepth 1 -type f ! -path '*/.git/*' | while IFS= read -r f; do
-            if grep -q "$OLD" "$f" 2>/dev/null; then
-                sed -i.bak "s/$OLD/$NEW/g" "$f"
-                echo "Updated $f"
-            fi
-        done
     done
 done
 
 # Update user crontab (for current user)
 if crontab -l >/dev/null 2>&1; then
     crontab -l | sed "s/$OLD/$NEW/g" | crontab -
-    echo "Updated crontab for $(id -un)"
+    printf 'Updated crontab for %s\n' "$(id -un)"
 fi
