@@ -14,20 +14,42 @@ $HOME
 /etc
 "
 
-# 1) Replace in regular files under the search paths
+# Directories to exclude (absolute paths or prefixes)
+EXCLUDES="
+$HOME/.cache
+$HOME/.local/share/Trash
+/var/lib/docker
+"
+
+is_excluded() {
+    p="$1"
+    for e in $EXCLUDES; do
+        case "$p" in
+            "$e"/*|"$e") return 0 ;;
+        esac
+    done
+    return 1
+}
+
 for p in $SEARCH_PATHS; do
     [ -d "$p" ] || continue
-    find "$p" -type f ! -path '*/.git/*' -exec sh -c '
-        OLD="$1"; NEW="$2"; f="$3"
-        # Skip binary-ish files (crude check)
-        if grep -q "$OLD" "$f" 2>/dev/null; then
-            sed -i.bak "s/$OLD/$NEW/g" "$f"
-            echo "Updated $f"
+    if is_excluded "$p"; then
+        continue
+    fi
+    find "$p" -type d | while IFS= read -r d; do
+        if is_excluded "$d"; then
+            continue
         fi
-    ' sh "$OLD" "$NEW" {} \;
+        find "$d" -maxdepth 1 -type f ! -path '*/.git/*' | while IFS= read -r f; do
+            if grep -q "$OLD" "$f" 2>/dev/null; then
+                sed -i.bak "s/$OLD/$NEW/g" "$f"
+                echo "Updated $f"
+            fi
+        done
+    done
 done
 
-# 2) Update user crontab (for current user)
+# Update user crontab (for current user)
 if crontab -l >/dev/null 2>&1; then
     crontab -l | sed "s/$OLD/$NEW/g" | crontab -
     echo "Updated crontab for $(id -un)"
