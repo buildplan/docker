@@ -1,4 +1,8 @@
 #!/bin/sh
+
+# run it with:
+# sh update-token.sh "tk_old_token_here" "tk_new_token_here"
+
 set -eu
 
 OLD="$1"
