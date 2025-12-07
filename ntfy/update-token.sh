@@ -36,9 +36,9 @@ $HOME
 # Directories to exclude (add/remove as needed)
 EXCLUDES="
 $HOME/.cache
+$HOME/.bash_history
 $HOME/.local/share/Trash
 /var/lib/docker
-$HOME/forgejo
 "
 
 # Build find(1) -path ... -prune expression from EXCLUDES
@@ -78,13 +78,13 @@ if [ "$(id -u)" -eq 0 ]; then
         crontab -l -u root | sed "s/$OLD/$NEW/g" | crontab -u root -
         printf 'Updated root crontab\n'
     fi
-    
+
     # System /etc/crontab
     if [ -f /etc/crontab ]; then
         sed -i.bak "s/$OLD/$NEW/g" /etc/crontab
         printf 'Updated /etc/crontab\n'
     fi
-    
+
     # System cron drop-in directory
     if [ -d /etc/cron.d ]; then
         find /etc/cron.d -type f -exec sed -i.bak "s/$OLD/$NEW/g" {} + 2>/dev/null
