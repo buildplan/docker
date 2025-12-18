@@ -10,9 +10,9 @@
 #   This script uses a "Self-Cleaning" strategy. If the IPv4 changes, it
 #   WIPES ALL ENTRIES in the target allowlist to prevent stale IPs piling up.
 #
-#   1. DO NOT target your main 'trusted_ips' list if it contains other static
-#      IPs (like office, servers, or friends). They will be deleted.
-#   2. ALWAYS use a dedicated list (e.g., 'home_dynamic_ips') just for this script.
+#     1. DO NOT target your main 'trusted_ips' list if it contains other static
+#        IPs (like office, servers, or friends). They will be deleted.
+#     2. ALWAYS use a dedicated list (e.g., 'home_dynamic_ips') just for this script.
 #
 #   PREREQUISITES (Run once):
 #     1. SSH Keys: Ensure passwordless login works.
