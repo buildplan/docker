@@ -14,12 +14,12 @@
 #      IPs (like office, servers, or friends). They will be deleted.
 #   2. ALWAYS use a dedicated list (e.g., 'home_dynamic_ips') just for this script.
 #
-# PREREQUISITES (Run once):
-#   1. SSH Keys: Ensure passwordless login works.
-#   2. User is part of docker group. i.e. can run docker commands without sudo
+#   PREREQUISITES (Run once):
+#     1. SSH Keys: Ensure passwordless login works.
+#     2. User is part of docker group. i.e. can run docker commands without sudo
 #
-# CRON EXAMPLE (Run every day 6AM):
-#   00 06 * * * QUIET=yes /path/to/this_script.sh >/dev/null 2>&1
+#   CRON EXAMPLE (Run every day 6AM):
+#     00 06 * * * QUIET=yes /path/to/this_script.sh >/dev/null 2>&1
 # ==============================================================================
 
 set -u
