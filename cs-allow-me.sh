@@ -4,18 +4,9 @@
 # CROWDSEC DYNAMIC HOME IP UPDATER (IPv4 + IPv6 CIDR)
 # ==============================================================================
 #
-# PURPOSE:
 #   Detects local public IP and adds it to a CrowdSec allowlist on a remote VPS.
 #   Uses a "Nuke & Pave" strategy: deletes the list and recreates it to ensure
 #   no stale IPs remain.
-#
-# FEATURES:
-#   - POSIX compliant (runs on Linux & macOS)
-#   - State file optimization (skips SSH if IP hasn't changed)
-#   - Exponential backoff (retries network failures)
-#   - ntfy notifications
-#
-#   *** CRITICAL CONFIGURATION WARNING ***
 #   This script uses a "Self-Cleaning" strategy. If the IPv4 changes, it
 #   WIPES ALL ENTRIES in the target allowlist to prevent stale IPs piling up.
 #
@@ -25,11 +16,10 @@
 #
 # PREREQUISITES (Run once):
 #   1. SSH Keys: Ensure passwordless login works.
-#   2. Create List: Run this on the VPS to create the dedicated list:
-#      docker exec crowdsec cscli allowlists create home_dynamic_ips
+#   2. User is part of docker group. i.e. can run docker commands without sudo
 #
-# CRON EXAMPLE (Run every 15 mins):
-#   */15 * * * * QUIET=yes /path/to/this_script.sh >/dev/null 2>&1
+# CRON EXAMPLE (Run every day 6AM):
+#   00 06 * * * QUIET=yes /path/to/this_script.sh >/dev/null 2>&1
 # ==============================================================================
 
 set -u
