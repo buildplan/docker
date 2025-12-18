@@ -14,7 +14,7 @@
 #        IPs (like office, servers, or friends). They will be deleted.
 #     2. ALWAYS use a dedicated list (e.g., 'home_dynamic_ips') just for this script.
 #
-#   PREREQUISITES (Run once):
+#   PREREQUISITES:
 #     1. SSH Keys: Ensure passwordless login works.
 #     2. User is part of docker group. i.e. can run docker commands without sudo
 #
