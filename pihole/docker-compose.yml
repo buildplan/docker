@@ -1,0 +1,153 @@
+networks:
+  traefik-net:
+    external: true
+  pihole-internal:
+    internal: true
+
+services:
+  # --- Traefik Proxy ---
+  traefik:
+    image: traefik:v3.6
+    container_name: traefik
+    dns: [ "1.1.1.1", "9.9.9.9" ]
+    restart: unless-stopped
+    depends_on:
+      crowdsec:
+        condition: service_healthy
+    security_opt: [ "no-new-privileges:true" ]
+    networks: [ "traefik-net" ]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/data/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/data/acme.json:/acme.json
+      - ./traefik/logs:/var/log/traefik
+    logging: { driver: "json-file", options: { max-size: "10m", max-file: "3" } }
+    env_file: [ ".env" ]
+
+  # --- Pi-hole ---
+  pihole:
+    image: pihole/pihole:latest
+    container_name: pihole
+    restart: unless-stopped
+    networks: [ "traefik-net", "pihole-internal" ]
+    dns: [ "1.1.1.1", "9.9.9.9" ]
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+    environment:
+      TZ: "${TZ:-Europe/London}"
+      FTLCONF_webserver_api_password: ""
+      FTLCONF_dns_listeningMode: "all"
+      VIRTUAL_HOST: "${PIHOLE_URL}"
+    volumes:
+      - './pihole/etc-pihole:/etc/pihole'
+    cap_add: [ "SYS_NICE" ]
+    logging: { driver: "json-file", options: { max-size: "5m", max-file: "3" } }
+
+    labels:
+      - "traefik.enable=true"
+
+      # --- SERVICE DEFINITION (used by all routers) ---
+      - "traefik.http.services.pihole-svc.loadbalancer.server.port=80"
+
+      # --- HTTP to HTTPS redirect router ---
+      - "traefik.http.routers.pihole-http.rule=Host(`${PIHOLE_URL}`)"
+      - "traefik.http.routers.pihole-http.entrypoints=web"
+      - "traefik.http.routers.pihole-http.service=pihole-svc"
+
+      # --- ROUTER 1: For static assets (CSS, JS, images, fonts) - NO OIDC ---
+      # Matches common asset paths and proxies them directly.
+      - "traefik.http.routers.pihole-assets.rule=Host(`${PIHOLE_URL}`) && (PathPrefix(`/admin/style/`) || PathPrefix(`/admin/scripts/`) || PathPrefix(`/admin/img/`) || PathPrefix(`/pihole/`))"
+      - "traefik.http.routers.pihole-assets.entrypoints=websecure"
+      - "traefik.http.routers.pihole-assets.service=pihole-svc"
+      - "traefik.http.routers.pihole-assets.tls=true"
+      # --- ROUTER 2: For the main UI pages - WITH OIDC ---
+      # This router has a lower priority so the more specific asset router is matched first.
+      - "traefik.http.routers.pihole-secure.rule=Host(`${PIHOLE_URL}`)"
+      - "traefik.http.routers.pihole-secure.entrypoints=websecure"
+      - "traefik.http.routers.pihole-secure.service=pihole-svc"
+      - "traefik.http.routers.pihole-secure.middlewares=pihole-oidc@docker" # Only OIDC needed here
+      - "traefik.http.routers.pihole-secure.tls=true"
+      - "traefik.http.routers.pihole-secure.priority=1" # Lower priority
+
+      # --- MIDDLEWARE DEFINITIONS ---
+      # OIDC Middleware for Pi-hole
+      - "traefik.http.middlewares.pihole-oidc.plugin.oidcAuth.Secret=${OIDC_PLUGIN_SECRET}"
+      - "traefik.http.middlewares.pihole-oidc.plugin.oidcAuth.Provider.Url=${OIDC_ISSUER_URL}"
+      - "traefik.http.middlewares.pihole-oidc.plugin.oidcAuth.Provider.ClientId=${PIHOLE_OIDC_CLIENT_ID}"
+      - "traefik.http.middlewares.pihole-oidc.plugin.oidcAuth.Provider.ClientSecret=${PIHOLE_OIDC_CLIENT_SECRET}"
+      - "traefik.http.middlewares.pihole-oidc.plugin.oidcAuth.Scopes=openid profile email"
+      - "traefik.http.middlewares.pihole-oidc.plugin.oidcAuth.Provider.UsePkce=true"
+      - "traefik.http.middlewares.pihole-oidc.plugin.oidcAuth.CallbackUrl=https://${PIHOLE_URL}/oidc/callback"
+
+      # --- ROUTER AND MIDDLEWARE FOR ROOT REDIRECT ---
+      # This router catches requests for the root path and applies the redirect middleware
+      - "traefik.http.routers.pihole-root-redirect.rule=Host(`${PIHOLE_URL}`) && Path(`/`)"
+      - "traefik.http.routers.pihole-root-redirect.entrypoints=websecure"
+      - "traefik.http.routers.pihole-root-redirect.middlewares=pihole-redirect-to-admin@docker"
+      - "traefik.http.routers.pihole-root-redirect.service=noop@internal"
+      - "traefik.http.routers.pihole-root-redirect.tls=true"
+      # This middleware performs the redirect from '/' to '/admin/'
+      - "traefik.http.middlewares.pihole-redirect-to-admin.redirectregex.regex=^https://(.*)/$$"
+      - "traefik.http.middlewares.pihole-redirect-to-admin.redirectregex.replacement=https://$${1}/admin/"
+      - "traefik.http.middlewares.pihole-redirect-to-admin.redirectregex.permanent=true"
+
+  # --- DoH Proxy for Pi-hole ---
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared-doh
+    restart: unless-stopped
+    depends_on: [ "pihole" ]
+    networks: [ "traefik-net", "pihole-internal" ]
+    command: proxy-dns --address 0.0.0.0 --port 5053 --upstream udp://pihole:53
+    logging: { driver: "json-file", options: { max-size: "5m", max-file: "3" } }
+    labels:
+      - "traefik.enable=true"
+      # --- SERVICE for cloudflared DoH proxy ---
+      - "traefik.http.services.doh-proxy-svc.loadbalancer.server.port=5053"
+      # --- ROUTER for DoH endpoint ---
+      - "traefik.http.routers.pihole-doh-secure.rule=Host(`${PIHOLE_URL}`) && PathPrefix(`/dns-query`)"
+      - "traefik.http.routers.pihole-doh-secure.entrypoints=websecure"
+      - "traefik.http.routers.pihole-doh-secure.service=doh-proxy-svc"
+      - "traefik.http.routers.pihole-doh-secure.middlewares=crowdsec-bouncer@docker" # Reference the middleware
+      - "traefik.http.routers.pihole-doh-secure.tls=true"
+      # --- CROWDSEC MIDDLEWARE DEFINITION (Duplicated for this service's context) ---
+      - "traefik.http.middlewares.crowdsec-bouncer.plugin.crowdsecBouncer.Enabled=true"
+      - "traefik.http.middlewares.crowdsec-bouncer.plugin.crowdsecBouncer.CrowdsecLapiScheme=http"
+      - "traefik.http.middlewares.crowdsec-bouncer.plugin.crowdsecBouncer.CrowdsecLapiHost=crowdsec:8080"
+      - "traefik.http.middlewares.crowdsec-bouncer.plugin.crowdsecBouncer.CrowdsecLapiKey=${CROWDSEC_TRAEFIK_BOUNCER_API_KEY}"
+      - "traefik.http.middlewares.crowdsec-bouncer.plugin.crowdsecBouncer.CrowdsecMode=stream"
+
+  # --- CrowdSec ---
+  crowdsec:
+    image: crowdsecurity/crowdsec:latest
+    container_name: crowdsec
+    restart: unless-stopped
+    networks: [ "traefik-net" ]
+    ports: [ "127.0.0.1:8080:8080" ]
+    dns:
+      - 1.1.1.1
+      - 9.9.9.9
+    environment:
+      - COLLECTION_SERVICE_JOURNALD_ENABLED=false
+      - TZ=${TZ:-Europe/London}
+    volumes:
+      - ./traefik/logs:/var/log/traefik:ro
+      - /var/log/auth.log:/var/log/host_auth.log
+      - /var/log/syslog:/var/log/host_syslog
+      - /var/log/kern.log:/var/log/host_kern.log
+      - /var/log/ufw.log:/var/log/ufw.log
+      - ./crowdsec/config:/etc/crowdsec:rw
+      - ./crowdsec/data:/var/lib/crowdsec/data:rw
+    cap_add: [ "DAC_READ_SEARCH" ]
+    healthcheck:
+      test: ["CMD", "cscli", "lapi", "status"]
+      interval: 15s
+      timeout: 10s
+      retries: 4
+      start_period: 30s
+    logging: { driver: "json-file", options: { max-size: "5m", max-file: "3" } }
+    
