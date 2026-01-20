@@ -215,7 +215,6 @@ EOF
         done
         printf '\n'
     fi
-
     # Dry-run output
     if [ "$DRY_RUN" -eq 1 ]; then
         printf '%b[dry-run]%b docker compose' "${YELLOW}" "${RESET}"
@@ -271,7 +270,6 @@ confirm_action() {
     if [ "$SKIP_CONFIRM" -eq 1 ] || [ ! -t 0 ]; then
         return 0
     fi
-
     case "$ACTION" in
         down|restart)
             printf '%b%bWarning:%b This will %s all discovered Docker Compose projects.\n' \
@@ -338,7 +336,6 @@ case "$ACTION" in
 esac
 
 # --- Execution ---
-
 if [ "$#" -gt 0 ]; then
     # Direct directory arguments provided
     for name in "$@"; do
@@ -350,13 +347,11 @@ else
         printf '%b%bInteractive mode%b\n' "${BOLD}" "${CYAN}" "${RESET}"
         printf 'Base directory to scan [%s]: ' "$(pwd)"
     fi
-
     # Read base dir, default to pwd if empty
     IFS= read -r BASE_DIR || BASE_DIR=""
     if [ -z "$BASE_DIR" ]; then
         BASE_DIR="$(pwd)"
     fi
-
     if [ ! -d "$BASE_DIR" ]; then
         printf '%bError:%b %b%s%b is not a directory.\n' \
             "${RED}" "${RESET}" "${CYAN}" "$BASE_DIR" "${RESET}" >&2
@@ -375,7 +370,6 @@ else
         else
             printf 'Folders to exclude (space-separated names, or press Enter): '
         fi
-
         IFS= read -r extra_excludes || true
         if [ -n "$extra_excludes" ]; then
             EXCLUDES_INPUT="${EXCLUDES_INPUT} ${extra_excludes}"
@@ -388,17 +382,14 @@ else
     # Scan and execute
     for dir in "$BASE_DIR"/*/; do
         [ -d "$dir" ] || continue
-
         dir="${dir%/}"
         folder_name=$(basename "$dir")
-
         if is_excluded "$folder_name"; then
             printf '%b------------------------------------------------%b\n' "${MAGENTA}" "${RESET}"
             printf '%bSkipping excluded folder:%b %b%s%b\n' \
                 "${YELLOW}" "${RESET}" "${CYAN}" "$folder_name" "${RESET}"
             continue
         fi
-
         run_compose_in_dir "$dir" || true
     done
 fi
@@ -408,17 +399,16 @@ if [ "$found_any" -eq 0 ]; then
     printf '\n%bNo subdirectories with compose files found.%b\n' "${YELLOW}" "${RESET}"
 else
     if [ "$ACTION" != "logs" ]; then
-        printf '\n%b=== Execution Summary ===%b\n' "${BOLD}" "${RESET}"
-
+        printf '\n%b%b=== Summary ===%b\n' "${BOLD}" "${MAGENTA}" "${RESET}"
         if [ -n "$SUCCESS_DIRS" ]; then
             SUCCESS_DIRS="${SUCCESS_DIRS# }"
-            printf '%bSuccess:%b %s\n' "${GREEN}" "${RESET}" "$SUCCESS_DIRS"
+            printf '%b  [OK] Success:%b %s\n' "${GREEN}" "${RESET}" "$SUCCESS_DIRS"
         fi
-
         if [ -n "$FAILED_DIRS" ]; then
             FAILED_DIRS="${FAILED_DIRS# }"
-            printf '%bFailed:%b %s\n' "${RED}" "${RESET}" "$FAILED_DIRS"
+            printf '%b  [!!] Failed:%b  %s\n' "${RED}" "${RESET}" "$FAILED_DIRS"
         fi
+        printf '\n'
     fi
 fi
 
