@@ -14,7 +14,7 @@ set -eu
 export LC_ALL=C
 
 SCRIPT_NAME=$(basename "$0")
-VERSION="0.5.1"
+VERSION="0.5.2"
 
 # --- Terminal color support detection ---
 if [ -t 1 ]; then
@@ -138,7 +138,7 @@ run_compose_in_dir() {
     dir="${1%/}"
     folder_name=$(basename "$dir")
     cmd_success=0
-    compose_files=""
+    compose_files="|"
     temp_file_list=""
 
     if [ ! -d "$dir" ]; then
@@ -183,7 +183,7 @@ EOF
     fi
 
     # No compose files found
-    if [ -z "$compose_files" ]; then
+    if [ "$compose_files" = "|" ]; then
         return 0
     fi
 
@@ -231,14 +231,13 @@ EOF
     fi
 
     # --- Execute action ---
-
+    cmd_success=0
     case "$ACTION" in
         up)
             if docker compose "$@" up -d --remove-orphans; then cmd_success=1; fi ;;
         down)
             if docker compose "$@" down --remove-orphans; then cmd_success=1; fi ;;
         restart)
-            # For restart, we stop on first error
             if docker compose "$@" down --remove-orphans; then
                 if docker compose "$@" up -d --remove-orphans; then
                     cmd_success=1
