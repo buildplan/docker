@@ -14,7 +14,7 @@ set -eu
 export LC_ALL=C
 
 SCRIPT_NAME=$(basename "$0")
-VERSION="0.5.2"
+VERSION="0.5.3"
 
 # --- Terminal color support detection ---
 if [ -t 1 ]; then
@@ -191,13 +191,17 @@ EOF
 
     # --- Build argument list from collected files ---
     set --
+    old_opts=$(set +o)
+    set -f
     IFS='|'
+    # shellcheck disable=SC2086
     for f in $compose_files; do
         if [ -n "$f" ]; then
             set -- "$@" -f "$f"
         fi
     done
     unset IFS
+    eval "$old_opts"
 
     printf '%b------------------------------------------------%b\n' "${MAGENTA}" "${RESET}"
     printf '%b%bRunning:%b docker compose %b%s%b for %b%s%b\n' \
@@ -229,6 +233,8 @@ EOF
         esac
         return 0
     fi
+
+    set -- "--project-directory" "$dir" "$@"
 
     # --- Execute action ---
     cmd_success=0
