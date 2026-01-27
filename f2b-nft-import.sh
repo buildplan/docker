@@ -1,8 +1,12 @@
 #!/bin/bash
 #
 # Fail2Ban/NFTables Blocklist Importer (IPv4 + IPv6)
-# Native NFTables version for Debian 12/13+
-#
+# Fetches multiple public blocklists, validates IPs/CIDRs, applies whitelisting, and updates NFTables sets.
+# For use with Fail2Ban to block malicious IPs at the firewall level.
+# Works on Debian-based systems with NFTables (Debian 12/13).
+
+# cron: 0 4 * * * /usr/local/bin/f2b-nft-import.sh >> /var/log/f2b-nft-import.log 2>&1
+# @reboot sleep 30 && /usr/local/bin/f2b-nft-import.sh >> /var/log/f2b-nft-import.log 2>&1
 
 set -euo pipefail
 IFS=$'\n\t'
@@ -13,12 +17,13 @@ CURL_TIMEOUT=45
 CURL_RETRIES=3
 
 # CUSTOM WHITELIST
+# Add IPs (1.2.3.4) or Prefixes (2b01:...) here.
 CUSTOM_WHITELIST=""
 
 # --- INITIALIZATION ---
-for cmd in curl sort awk grep comm nft; do
+for cmd in curl sort awk grep comm nft python3; do
     if ! command -v "$cmd" &> /dev/null; then
-        echo "[ERROR] Required command '$cmd' not found. Please install it (apt install nftables)."
+        echo "[ERROR] Required command '$cmd' not found. Please install it (apt install python3 nftables)."
         exit 1
     fi
 done
@@ -77,6 +82,21 @@ fetch_list() {
     fi
 }
 
+optimize_list() {
+    python3 -c "
+import sys, ipaddress
+try:
+    # strict=False fixes 'dirty' subnets (e.g. 1.2.3.1/24 becomes 1.2.3.0/24)
+    nets = [ipaddress.ip_network(line.strip(), strict=False) for line in sys.stdin if line.strip()]
+    # collapse_addresses merges overlaps (e.g. 1.2.3.4 + 1.2.3.0/24 -> 1.2.3.0/24)
+    for net in ipaddress.collapse_addresses(nets):
+        print(net)
+except Exception as e:
+    sys.stderr.write(f'Error optimizing IPs: {e}\n')
+    sys.exit(1)
+"
+}
+
 # --- MAIN ---
 
 main() {
@@ -99,12 +119,14 @@ main() {
 
     log "Validating IPs..."
 
+    # IPv4 Validation (Handles /CIDR)
     cat v4_*.txt 2>/dev/null > raw_v4.txt || true
-    grep -oE "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" raw_v4.txt | \
+    grep -oE "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]{1,2})?" raw_v4.txt | \
     awk -F'.' '$1<=255 && $2<=255 && $3<=255 && $4<=255 { print $0 }' | \
     grep -vE "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|127\.|0\.|224\.|240\.|255\.)" \
     > clean_v4.txt
 
+    # IPv6 Validation
     cat v6_*.txt 2>/dev/null > raw_v6.txt || true
     grep -iE "^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}(/[0-9]{1,3})?$" raw_v6.txt \
     > clean_v6.txt
@@ -123,8 +145,14 @@ main() {
         echo "$pattern" >> whitelist_patterns.txt
     done
 
-    grep -v -F -f whitelist_patterns.txt clean_v4.txt | sort -u > final_v4.txt
-    grep -v -F -f whitelist_patterns.txt clean_v6.txt | sort -u > final_v6.txt
+    grep -v -F -f whitelist_patterns.txt clean_v4.txt > step1_v4.txt
+    grep -v -F -f whitelist_patterns.txt clean_v6.txt > step1_v6.txt
+
+    log "Optimizing Lists (merging overlaps)..."
+
+    # Merge overlapping CIDRs using Python
+    cat step1_v4.txt | optimize_list > final_v4.txt
+    cat step1_v6.txt | optimize_list > final_v6.txt
 
     log "Generating NFTables configuration..."
 
@@ -138,12 +166,14 @@ table inet $NFT_TABLE {
     set v4_list {
         type ipv4_addr
         flags interval
+        auto-merge
         elements = { $V4_ELEMENTS }
     }
 
     set v6_list {
         type ipv6_addr
         flags interval
+        auto-merge
         elements = { $V6_ELEMENTS }
     }
 
