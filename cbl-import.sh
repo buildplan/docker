@@ -152,7 +152,7 @@ main() {
     fetch_list "CI Army" "https://cinsscore.com/list/ci-badguys.txt" "v4_ci.txt" "grep -v '^#'"
     fetch_list "Binary Defense" "https://www.binarydefense.com/banlist.txt" "v4_binary.txt" "grep -v '^#'"
     fetch_list "Tor Exit Nodes" "https://check.torproject.org/torbulkexitlist" "v4_tor.txt" "grep -v '^#'"
-    
+
     # --- 2. Fetching IPv6 Lists ---
     fetch_list "Spamhaus DROPv6" "https://www.spamhaus.org/drop/dropv6.txt" "v6_drop.txt" "grep -v '^;' | awk '{print \$1}' | cut -d';' -f1"
 
@@ -197,7 +197,7 @@ main() {
 
     REGEX_IPV4="[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+"
     REGEX_IPV6="[0-9a-fA-F:]*:[0-9a-fA-F:]+"
-    
+
     if [ "$MODE" = "native" ]; then
         cscli decisions list -a 2>/dev/null | grep -oE "($REGEX_IPV4|$REGEX_IPV6)" | sort -u > existing_decisions.txt || touch existing_decisions.txt
     else
