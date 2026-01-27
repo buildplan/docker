@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # CrowdSec Blocklist Importer (IPv4 + IPv6)
-# 2026-01-27: Docker-safe, ShellCheck
+# 2026-01-27: Auto-Whitelisting, Docker & Native Support
 #
 
 set -euo pipefail
@@ -24,7 +24,9 @@ MODE="${MODE:-auto}"
 CURL_TIMEOUT=45
 CURL_RETRIES=3
 
-# Whitelist: IPs here will NEVER be imported (space/newline separated)
+# Add IPs or Prefixes here. Space separated.
+# - For single IPs: Just add the IP (e.g. "1.2.3.4")
+# - For IPv6 Ranges: Add the prefix ending with a colon (e.g. "2b01:4c00:...")
 CUSTOM_WHITELIST=""
 
 # ==============================================================================
@@ -162,16 +164,15 @@ main() {
     # --- 3. Validation & Merging ---
     log "Validating IPs..."
 
-    # IPv4 Validation (Strict)
+    # IPv4 Validation
     cat v4_*.txt 2>/dev/null > raw_v4.txt || true
     grep -oE "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" raw_v4.txt | \
     awk -F'.' '$1<=255 && $2<=255 && $3<=255 && $4<=255 { print $0 }' | \
     grep -vE "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|127\.|0\.|224\.|240\.|255\.)" \
     > clean_v4.txt
 
-    # IPv6 Validation (Loose check for colons/hex, CrowdSec API will do final strict check)
+    # IPv6 Validation
     cat v6_*.txt 2>/dev/null > raw_v6.txt || true
-    # Regex looks for at least two colons and hex characters
     grep -iE "^([0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}(/[0-9]{1,3})?$" raw_v6.txt \
     > clean_v6.txt
 
@@ -183,31 +184,36 @@ main() {
     fi
 
     # --- 4. Whitelisting ---
-    touch whitelist.txt
+    touch whitelist_patterns.txt
     {
         echo "1.1.1.1"    # Cloudflare DNS
         echo "8.8.8.8"    # Google DNS
         echo "::1"        # IPv6 Localhost
         echo "2001:4860:4860::8888" # Google IPv6 DNS
         echo "2606:4700:4700::1111" # Cloudflare IPv6 DNS
-        for ip in $CUSTOM_WHITELIST; do echo "$ip"; done
-    } >> whitelist.txt
+    } >> whitelist_patterns.txt
 
-    comm -23 <(sort -u validated_ips.txt) <(sort -u whitelist.txt) > final_import_list.txt
+    for pattern in $CUSTOM_WHITELIST; do
+        echo "$pattern" >> whitelist_patterns.txt
+    done
+
+    grep -v -F -f whitelist_patterns.txt validated_ips.txt > final_import_list.txt
 
     # --- 5. Deduplication ---
     log "Checking against existing decisions..."
 
-    REGEX_IPV4="[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+"
-    REGEX_IPV6="[0-9a-fA-F:]*:[0-9a-fA-F:]+"
+    REGEX_IPV4='[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+'
+    REGEX_IPV6='[0-9a-fA-F:]*:[0-9a-fA-F:]+'
 
+    # Fetch existing decisions from CrowdSec
     if [ "$MODE" = "native" ]; then
-        cscli decisions list -a 2>/dev/null | grep -oE "($REGEX_IPV4|$REGEX_IPV6)" | sort -u > existing_decisions.txt || touch existing_decisions.txt
+        cscli decisions list -a 2>/dev/null | grep -oE "($REGEX_IPV4|$REGEX_IPV6)" | sort -u > existing.txt || touch existing.txt
     else
-        docker exec -i "$CROWDSEC_CONTAINER" cscli decisions list -a 2>/dev/null | grep -oE "($REGEX_IPV4|$REGEX_IPV6)" | sort -u > existing_decisions.txt || touch existing_decisions.txt
+        docker exec -i "$CROWDSEC_CONTAINER" cscli decisions list -a 2>/dev/null | grep -oE "($REGEX_IPV4|$REGEX_IPV6)" | sort -u > existing.txt || touch existing.txt
     fi
 
-    comm -23 final_import_list.txt existing_decisions.txt > new_ips.txt
+    # Compare lists
+    comm -23 <(sort -u final_import_list.txt) existing.txt > new_ips.txt
 
     COUNT=$(wc -l < new_ips.txt)
     TOTAL=$(wc -l < final_import_list.txt)
