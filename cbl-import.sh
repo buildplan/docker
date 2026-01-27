@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# Production CrowdSec Blocklist Importer
-# Final Version: ShellCheck Clean, Docker-safe, Robust
+# CrowdSec Blocklist Importer (IPv4 + IPv6)
+# 2026-01-27: Docker-safe, ShellCheck
 #
 
 set -euo pipefail
@@ -34,12 +34,12 @@ CUSTOM_WHITELIST=""
 # Dependency check
 for cmd in curl sort awk grep comm; do
     if ! command -v "$cmd" &> /dev/null; then
-        echo "[ERROR] Required command '$cmd' not found. Please install it."
+        echo "[ERROR] Required command '$cmd' not found."
         exit 1
     fi
 done
 
-# Create secure temporary directory
+# Create temporary directory
 TEMP_DIR=$(mktemp -d -t crowdsec-blocklist.XXXXXXXXXX)
 LOCK_FILE="/tmp/crowdsec-blocklist-import.lock"
 
@@ -56,7 +56,7 @@ if [ -f "$LOCK_FILE" ]; then
         echo "[ERROR] Script is already running (PID $(cat "$LOCK_FILE")). Exiting."
         exit 1
     else
-        echo "[WARN] Stale lock file found. Removing."
+        echo "[WARN] Stale lock found. Removing."
     fi
 fi
 echo $$ > "$LOCK_FILE"
@@ -67,7 +67,7 @@ warn()  { echo "[$(date +'%Y-%m-%d %H:%M:%S')] [WARN]  $*"; }
 error() { echo "[$(date +'%Y-%m-%d %H:%M:%S')] [ERROR] $*"; }
 
 # ==============================================================================
-# CROWDSEC DETECTION LOGIC
+# DETECTION & API WRAPPERS
 # ==============================================================================
 
 detect_env() {
@@ -107,10 +107,6 @@ run_cscli_stdin() {
     fi
 }
 
-# ==============================================================================
-# CORE FUNCTIONS
-# ==============================================================================
-
 fetch_list() {
     local name="$1"
     local url="$2"
@@ -141,59 +137,71 @@ fetch_list() {
 }
 
 # ==============================================================================
-# MAIN EXECUTION
+# MAIN
 # ==============================================================================
 
 main() {
     detect_env
-
     cd "$TEMP_DIR"
 
-    # --- 1. Fetching Blocklists ---
-    fetch_list "IPsum" "https://raw.githubusercontent.com/stamparm/ipsum/master/levels/3.txt" "ipsum.txt" "grep -v '^#' | awk '{print \$1}'"
-    fetch_list "Spamhaus DROP" "https://www.spamhaus.org/drop/drop.txt" "drop.txt" "grep -v '^;' | awk '{print \$1}' | cut -d';' -f1"
-    fetch_list "Emerging Threats" "https://rules.emergingthreats.net/blockrules/compromised-ips.txt" "et.txt" "grep -v '^#'"
-    fetch_list "Feodo Tracker" "https://feodotracker.abuse.ch/downloads/ipblocklist.txt" "feodo.txt" "grep -v '^#'"
-    fetch_list "CI Army" "https://cinsscore.com/list/ci-badguys.txt" "ci.txt" "grep -v '^#'"
-    fetch_list "Binary Defense" "https://www.binarydefense.com/banlist.txt" "binary.txt" "grep -v '^#'"
-    fetch_list "Tor Exit Nodes" "https://check.torproject.org/torbulkexitlist" "tor.txt" "grep -v '^#'"
+    # --- 1. Fetching IPv4 Lists ---
+    fetch_list "IPsum" "https://raw.githubusercontent.com/stamparm/ipsum/master/levels/3.txt" "v4_ipsum.txt" "grep -v '^#' | awk '{print \$1}'"
+    fetch_list "Spamhaus DROP" "https://www.spamhaus.org/drop/drop.txt" "v4_drop.txt" "grep -v '^;' | awk '{print \$1}' | cut -d';' -f1"
+    fetch_list "Emerging Threats" "https://rules.emergingthreats.net/blockrules/compromised-ips.txt" "v4_et.txt" "grep -v '^#'"
+    fetch_list "Feodo Tracker" "https://feodotracker.abuse.ch/downloads/ipblocklist.txt" "v4_feodo.txt" "grep -v '^#'"
+    fetch_list "CI Army" "https://cinsscore.com/list/ci-badguys.txt" "v4_ci.txt" "grep -v '^#'"
+    fetch_list "Binary Defense" "https://www.binarydefense.com/banlist.txt" "v4_binary.txt" "grep -v '^#'"
+    fetch_list "Tor Exit Nodes" "https://check.torproject.org/torbulkexitlist" "v4_tor.txt" "grep -v '^#'"
+    
+    # --- 2. Fetching IPv6 Lists ---
+    fetch_list "Spamhaus DROPv6" "https://www.spamhaus.org/drop/dropv6.txt" "v6_drop.txt" "grep -v '^;' | awk '{print \$1}' | cut -d';' -f1"
 
-    # --- 2. Processing & Validation ---
-    log "Processing and validating IPs..."
+    # --- 3. Validation & Merging ---
+    log "Validating IPs..."
 
-    cat ./*.txt 2>/dev/null > raw_combined.txt || true
+    # IPv4 Validation (Strict)
+    cat v4_*.txt 2>/dev/null > raw_v4.txt || true
+    grep -oE "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" raw_v4.txt | \
+    awk -F'.' '$1<=255 && $2<=255 && $3<=255 && $4<=255 { print $0 }' | \
+    grep -vE "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|127\.|0\.|224\.|240\.|255\.)" \
+    > clean_v4.txt
 
-    if [ ! -s raw_combined.txt ]; then
-        error "No IPs fetched from any source. Aborting."
+    # IPv6 Validation (Loose check for colons/hex, CrowdSec API will do final strict check)
+    cat v6_*.txt 2>/dev/null > raw_v6.txt || true
+    # Regex looks for at least two colons and hex characters
+    grep -iE "^([0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}(/[0-9]{1,3})?$" raw_v6.txt \
+    > clean_v6.txt
+
+    cat clean_v4.txt clean_v6.txt > validated_ips.txt
+
+    if [ ! -s validated_ips.txt ]; then
+        error "No IPs found. Aborting."
         exit 1
     fi
 
-    grep -oE "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" raw_combined.txt | \
-    awk -F'.' '$1>=0 && $1<=255 && $2>=0 && $2<=255 && $3>=0 && $3<=255 && $4>=0 && $4<=255 { printf "%d.%d.%d.%d\n", $1, $2, $3, $4 }' | \
-    grep -vE "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|127\.|0\.|224\.|240\.|255\.|169\.254\.)" \
-    > validated_ips.txt
-
-    # --- 3. Whitelisting ---
+    # --- 4. Whitelisting ---
     touch whitelist.txt
-
     {
-        echo "1.1.1.1"
-        echo "8.8.8.8"
-        echo "9.9.9.9"
-        for ip in $CUSTOM_WHITELIST; do
-            echo "$ip"
-        done
+        echo "1.1.1.1"    # Cloudflare DNS
+        echo "8.8.8.8"    # Google DNS
+        echo "::1"        # IPv6 Localhost
+        echo "2001:4860:4860::8888" # Google IPv6 DNS
+        echo "2606:4700:4700::1111" # Cloudflare IPv6 DNS
+        for ip in $CUSTOM_WHITELIST; do echo "$ip"; done
     } >> whitelist.txt
 
     comm -23 <(sort -u validated_ips.txt) <(sort -u whitelist.txt) > final_import_list.txt
 
-    # --- 4. Deduplication against CrowdSec ---
+    # --- 5. Deduplication ---
     log "Checking against existing decisions..."
 
+    REGEX_IPV4="[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+"
+    REGEX_IPV6="[0-9a-fA-F:]*:[0-9a-fA-F:]+"
+    
     if [ "$MODE" = "native" ]; then
-        cscli decisions list -a 2>/dev/null | grep -oE "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" | sort -u > existing_decisions.txt || touch existing_decisions.txt
+        cscli decisions list -a 2>/dev/null | grep -oE "($REGEX_IPV4|$REGEX_IPV6)" | sort -u > existing_decisions.txt || touch existing_decisions.txt
     else
-        docker exec -i "$CROWDSEC_CONTAINER" cscli decisions list -a 2>/dev/null | grep -oE "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" | sort -u > existing_decisions.txt || touch existing_decisions.txt
+        docker exec -i "$CROWDSEC_CONTAINER" cscli decisions list -a 2>/dev/null | grep -oE "($REGEX_IPV4|$REGEX_IPV6)" | sort -u > existing_decisions.txt || touch existing_decisions.txt
     fi
 
     comm -23 final_import_list.txt existing_decisions.txt > new_ips.txt
@@ -206,7 +214,7 @@ main() {
         exit 0
     fi
 
-    # --- 5. Import ---
+    # --- 6. Import ---
     log "Importing $COUNT new IPs..."
 
     cat new_ips.txt | run_cscli_stdin decisions import \
