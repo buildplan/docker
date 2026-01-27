@@ -147,6 +147,7 @@ main() {
     cd "$TEMP_DIR"
 
     # --- 1. Fetching IPv4 Lists ---
+    fetch_list "AbuseIPDB" "https://raw.githubusercontent.com/borestad/blocklist-abuseipdb/main/abuseipdb-s100-30d.ipv4" "v4_abuseipdb.txt" "grep -v '^#' | awk '{print \$1}'"
     fetch_list "IPsum" "https://raw.githubusercontent.com/stamparm/ipsum/master/levels/3.txt" "v4_ipsum.txt" "grep -v '^#'"
     fetch_list "Spamhaus DROP" "https://www.spamhaus.org/drop/drop.txt" "v4_drop.txt" "grep -v '^;' | awk '{print \$1}' | cut -d';' -f1"
     fetch_list "Emerging Threats" "https://rules.emergingthreats.net/blockrules/compromised-ips.txt" "v4_et.txt" "grep -v '^#'"
