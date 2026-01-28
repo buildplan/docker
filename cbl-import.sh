@@ -1,16 +1,17 @@
 #!/bin/bash
 #
 # CrowdSec Blocklist Importer (IPv4 + IPv6)
-# 2026-01-27: Auto-Whitelisting, Docker & Native Support
 #
+# 2026-01-28
+#
+# Fetches multiple public blocklists, validates IPs/CIDRs, applies whitelisting, and imports new bans into CrowdSec.
+# Supports both native installations and Docker container setups.
+# Can be run via cron for regular updates.
 
 set -euo pipefail
 IFS=$'\n\t'
 
-# ==============================================================================
-# CONFIGURATION
-# ==============================================================================
-
+# --- CONFIGURATION ---
 # How long to ban IPs for
 DECISION_DURATION="${DECISION_DURATION:-24h}"
 
@@ -24,14 +25,17 @@ MODE="${MODE:-auto}"
 CURL_TIMEOUT=45
 CURL_RETRIES=3
 
+# Log File Location
+LOG_FILE="/var/log/cs-import.log"
+
 # Add IPs or Prefixes here. Space separated.
 # - For single IPs: Just add the IP (e.g. "1.2.3.4")
 # - For IPv6 Ranges: Add the prefix ending with a colon (e.g. "2b01:4c00:...")
 CUSTOM_WHITELIST=""
 
-# ==============================================================================
-# INITIALIZATION
-# ==============================================================================
+# --- INITIALIZATION ---
+# Redirect all output to log file
+exec > >(tee -a "$LOG_FILE") 2>&1
 
 # Dependency check
 for cmd in curl sort awk grep comm; do
@@ -68,9 +72,7 @@ log()   { echo "[$(date +'%Y-%m-%d %H:%M:%S')] [INFO]  $*"; }
 warn()  { echo "[$(date +'%Y-%m-%d %H:%M:%S')] [WARN]  $*"; }
 error() { echo "[$(date +'%Y-%m-%d %H:%M:%S')] [ERROR] $*"; }
 
-# ==============================================================================
-# DETECTION & API WRAPPERS
-# ==============================================================================
+# --- DETECTION & API WRAPPERS ---
 
 detect_env() {
     if [ "$MODE" = "native" ]; then
@@ -138,15 +140,13 @@ fetch_list() {
     fi
 }
 
-# ==============================================================================
-# MAIN
-# ==============================================================================
+# --- MAIN ---
 
 main() {
     detect_env
     cd "$TEMP_DIR"
 
-    # --- 1. Fetching IPv4 Lists ---
+    # 1. Fetching IPv4 Lists
     fetch_list "AbuseIPDB" "https://raw.githubusercontent.com/borestad/blocklist-abuseipdb/main/abuseipdb-s100-30d.ipv4" "v4_abuseipdb.txt" "grep -v '^#' | awk '{print \$1}'"
     fetch_list "IPsum" "https://raw.githubusercontent.com/stamparm/ipsum/master/levels/3.txt" "v4_ipsum.txt" "grep -v '^#'"
     fetch_list "Spamhaus DROP" "https://www.spamhaus.org/drop/drop.txt" "v4_drop.txt" "grep -v '^;' | awk '{print \$1}' | cut -d';' -f1"
@@ -159,13 +159,13 @@ main() {
     fetch_list "GreenSnow" "https://blocklist.greensnow.co/greensnow.txt" "v4_greensnow.txt" "grep -v '^#'"
     fetch_list "DShield" "https://feeds.dshield.org/block.txt" "v4_dshield.txt" "grep -v '^#' | awk '{print \$1 \"/\" \$3}'"
 
-    # --- 2. Fetching IPv6 Lists ---
+    # 2. Fetching IPv6 Lists
     fetch_list "Spamhaus DROPv6" "https://www.spamhaus.org/drop/dropv6.txt" "v6_drop.txt" "grep -v '^;' | awk '{print \$1}' | cut -d';' -f1"
 
-    # --- 3. Validation & Merging ---
+    # 3. Validation & Merging
     log "Validating IPs..."
 
-    # IPv4 Validation
+    # IPv4 Validation (Handles /CIDR)
     cat v4_*.txt 2>/dev/null > raw_v4.txt || true
     grep -oE "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]{1,2})?" raw_v4.txt | \
     awk -F'.' '$1<=255 && $2<=255 && $3<=255 && $4<=255 { print $0 }' | \
@@ -179,12 +179,16 @@ main() {
 
     cat clean_v4.txt clean_v6.txt > validated_ips.txt
 
-    if [ ! -s validated_ips.txt ]; then
-        error "No IPs found. Aborting."
+    # Safety Check
+    # If < 200, something is wrong with the downloads.
+    TOTAL_IPS=$(wc -l < validated_ips.txt)
+    if [ "$TOTAL_IPS" -lt 200 ]; then
+        error "Safety Brake: Only found $TOTAL_IPS IPs (Threshold: 200)."
+        error "Downloads may have failed. Aborting import."
         exit 1
     fi
 
-    # --- 4. Whitelisting ---
+    # 4. Whitelisting
     touch whitelist_patterns.txt
     {
         echo "1.1.1.1"    # Cloudflare DNS
@@ -200,7 +204,7 @@ main() {
 
     grep -v -F -f whitelist_patterns.txt validated_ips.txt > final_import_list.txt
 
-    # --- 5. Deduplication ---
+    # 5. Deduplication
     log "Checking against existing decisions..."
 
     REGEX_IPV4='[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+'
@@ -224,7 +228,7 @@ main() {
         exit 0
     fi
 
-    # --- 6. Import ---
+    # 6. Import
     log "Importing $COUNT new IPs..."
 
     cat new_ips.txt | run_cscli_stdin decisions import \
