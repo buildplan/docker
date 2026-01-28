@@ -1,9 +1,10 @@
 #!/bin/bash
 #
+# 2026-01-28
 # Fail2Ban/NFTables Blocklist Importer (IPv4 + IPv6)
 # Fetches multiple public blocklists, validates IPs/CIDRs, applies whitelisting, and updates NFTables sets.
 # For use with Fail2Ban to block malicious IPs at the firewall level.
-# Works on Debian-based systems with NFTables (Debian 12/13).
+# Works on systems with NFTables (Debian 12/13).
 
 # cron: 0 4 * * * /usr/local/bin/f2b-nft-import.sh >> /var/log/f2b-nft-import.log 2>&1
 # @reboot sleep 30 && /usr/local/bin/f2b-nft-import.sh >> /var/log/f2b-nft-import.log 2>&1
@@ -15,12 +16,17 @@ IFS=$'\n\t'
 NFT_TABLE="crowdsec_blocklists"
 CURL_TIMEOUT=45
 CURL_RETRIES=3
+LOG_FILE="/var/log/f2b-nft-import.log"
 
 # CUSTOM WHITELIST
 # Add IPs (1.2.3.4) or Prefixes (2b01:...) here.
 CUSTOM_WHITELIST=""
 
 # --- INITIALIZATION ---
+# Redirect all output to log file
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+# Check for required commands
 for cmd in curl sort awk grep comm nft python3; do
     if ! command -v "$cmd" &> /dev/null; then
         echo "[ERROR] Required command '$cmd' not found. Please install it (apt install python3 nftables)."
@@ -28,6 +34,7 @@ for cmd in curl sort awk grep comm nft python3; do
     fi
 done
 
+# Create temporary working directory and lock file
 TEMP_DIR=$(mktemp -d -t nft-blocklist.XXXXXXXXXX)
 LOCK_FILE="/tmp/nft-blocklist-import.lock"
 
@@ -86,9 +93,7 @@ optimize_list() {
     python3 -c "
 import sys, ipaddress
 try:
-    # strict=False fixes 'dirty' subnets (e.g. 1.2.3.1/24 becomes 1.2.3.0/24)
     nets = [ipaddress.ip_network(line.strip(), strict=False) for line in sys.stdin if line.strip()]
-    # collapse_addresses merges overlaps (e.g. 1.2.3.4 + 1.2.3.0/24 -> 1.2.3.0/24)
     for net in ipaddress.collapse_addresses(nets):
         print(net)
 except Exception as e:
@@ -185,6 +190,17 @@ table inet $NFT_TABLE {
     }
 }
 EOF
+
+    # Safety Check
+    log "Performing safety check on total IPs..."
+
+    MIN_IPS=500
+    TOTAL_IPS=$(( $(wc -l < final_v4.txt) + $(wc -l < final_v6.txt) ))
+    if [ "$TOTAL_IPS" -lt "$MIN_IPS" ]; then
+        error "Safety Brake: Only found $TOTAL_IPS IPs (Threshold: $MIN_IPS)."
+        error "Something went wrong with downloads. Keeping old rules active."
+        exit 1
+    fi
 
     # Apply to Kernel
     log "Applying rules to NFTables..."
