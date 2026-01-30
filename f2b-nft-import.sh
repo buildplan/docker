@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# 2026-01-28
+# 2026-01-30
 # Fail2Ban/NFTables Blocklist Importer (IPv4 + IPv6)
 # Fetches multiple public blocklists, validates IPs/CIDRs, applies whitelisting, and updates NFTables sets.
 # For use with Fail2Ban to block malicious IPs at the firewall level.
@@ -89,16 +89,115 @@ fetch_list() {
     fi
 }
 
+# Strict IPv4 validation - rejects leading zeros and invalid formats
+validate_ipv4() {
+    python3 -c "
+import sys, ipaddress
+valid_count = 0
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        # Split IP and CIDR if present
+        if '/' in line:
+            ip_part, cidr = line.split('/', 1)
+            cidr = int(cidr)
+            if not (0 <= cidr <= 32):
+                continue
+        else:
+            ip_part = line
+        
+        # Reject leading zeros (e.g., 1.0.7.01)
+        octets = ip_part.split('.')
+        if len(octets) != 4:
+            continue
+        
+        # Check for leading zeros or invalid octets
+        for octet in octets:
+            if not octet or not octet.isdigit():
+                raise ValueError('Invalid octet')
+            # Reject leading zeros like '01', '001' (but allow '0')
+            if len(octet) > 1 and octet[0] == '0':
+                raise ValueError('Leading zero')
+            if int(octet) > 255:
+                raise ValueError('Octet > 255')
+        
+        # Validate with ipaddress module
+        net = ipaddress.ip_network(line, strict=False)
+        if isinstance(net, ipaddress.IPv4Network):
+            print(net)
+            valid_count += 1
+    except (ValueError, ipaddress.AddressValueError):
+        continue
+sys.exit(0 if valid_count > 0 else 1)
+"
+}
+
+# Strict IPv6 validation
+validate_ipv6() {
+    python3 -c "
+import sys, ipaddress
+valid_count = 0
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        net = ipaddress.ip_network(line, strict=False)
+        if isinstance(net, ipaddress.IPv6Network):
+            print(net)
+            valid_count += 1
+    except (ValueError, ipaddress.AddressValueError):
+        continue
+sys.exit(0 if valid_count > 0 else 1)
+"
+}
+
 optimize_list() {
+    local ip_version="$1"  # "v4" or "v6"
+    
     python3 -c "
 import sys, ipaddress
 try:
-    nets = [ipaddress.ip_network(line.strip(), strict=False) for line in sys.stdin if line.strip()]
-    for net in ipaddress.collapse_addresses(nets):
+    nets = []
+    invalid_count = 0
+    
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            net = ipaddress.ip_network(line, strict=False)
+            nets.append(net)
+        except Exception as e:
+            invalid_count += 1
+            sys.stderr.write(f'Skipping invalid entry: {line} ({e})\\n')
+            continue
+    
+    if invalid_count > 0:
+        sys.stderr.write(f'Skipped {invalid_count} invalid entries\\n')
+    
+    if not nets:
+        sys.stderr.write('No valid networks to optimize\\n')
+        sys.exit(1)
+    
+    # Collapse overlapping ranges
+    collapsed = ipaddress.collapse_addresses(nets)
+    for net in collapsed:
         print(net)
+    
+    sys.exit(0)
+    
 except Exception as e:
-    sys.stderr.write(f'Error optimizing IPs: {e}\n')
-    sys.exit(1)
+    sys.stderr.write(f'Fatal error during optimization: {e}\\n')
+    # In case of fatal error, output original input
+    sys.stdin.seek(0)
+    for line in sys.stdin:
+        line = line.strip()
+        if line:
+            print(line)
+    sys.exit(0)
 "
 }
 
@@ -106,50 +205,62 @@ except Exception as e:
 
 main() {
     cd "$TEMP_DIR"
+    
+    FETCH_SUCCESS_COUNT=0
+    FETCH_TOTAL=0
 
-    # Fetching IPv4 Lists
-    fetch_list "AbuseIPDB" "https://raw.githubusercontent.com/borestad/blocklist-abuseipdb/main/abuseipdb-s100-30d.ipv4" "v4_abuseipdb.txt" "grep -v '^#' | awk '{print \$1}'"
-    fetch_list "IPsum" "https://raw.githubusercontent.com/stamparm/ipsum/master/levels/3.txt" "v4_ipsum.txt" "grep -v '^#'"
-    fetch_list "Spamhaus DROP" "https://www.spamhaus.org/drop/drop.txt" "v4_drop.txt" "grep -v '^;' | awk '{print \$1}' | cut -d';' -f1"
-    fetch_list "Emerging Threats" "https://rules.emergingthreats.net/blockrules/compromised-ips.txt" "v4_et.txt" "grep -v '^#'"
-    fetch_list "Feodo Tracker" "https://feodotracker.abuse.ch/downloads/ipblocklist.txt" "v4_feodo.txt" "grep -v '^#'"
-    fetch_list "URLhaus" "https://urlhaus.abuse.ch/downloads/text_online/" "v4_urlhaus.txt" "grep -oE '([0-9]{1,3}\\.){3}[0-9]{1,3}'"
-    fetch_list "CI Army" "https://cinsscore.com/list/ci-badguys.txt" "v4_ci.txt" "grep -v '^#'"
-    fetch_list "Binary Defense" "https://www.binarydefense.com/banlist.txt" "v4_binary.txt" "grep -v '^#'"
-    fetch_list "Bruteforce Blocker" "https://danger.rulez.sk/projects/bruteforceblocker/blist.php" "v4_bruteforce.txt" "grep -v '^#'"
-    fetch_list "Tor Exit Nodes" "https://check.torproject.org/torbulkexitlist" "v4_tor.txt" "grep -v '^#'"
-    fetch_list "Blocklist.de" "https://lists.blocklist.de/lists/all.txt" "v4_blocklist_de.txt" "grep -v '^#'"
-    fetch_list "Blocklist.de SSH" "https://lists.blocklist.de/lists/ssh.txt" "v4_blocklist_ssh.txt" "grep -v '^#'"
-    fetch_list "Blocklist.de Apache" "https://lists.blocklist.de/lists/apache.txt" "v4_blocklist_apache.txt" "grep -v '^#'"
-    fetch_list "Blocklist.de mail" "https://lists.blocklist.de/lists/mail.txt" "v4_blocklist_mail.txt" "grep -v '^#'"
-    fetch_list "GreenSnow" "https://blocklist.greensnow.co/greensnow.txt" "v4_greensnow.txt" "grep -v '^#'"
-    fetch_list "DShield" "https://feeds.dshield.org/block.txt" "v4_dshield.txt" "grep -v '^#' | awk '{print \$1 \"/\" \$3}'"
-    fetch_list "Botscout" "https://raw.githubusercontent.com/firehol/blocklist-ipsets/refs/heads/master/botscout_7d.ipset" "v4_botscout.txt" "grep -v '^#'"
-    fetch_list "Firehol level1" "https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/firehol_level1.netset" "v4_firehol_l1.txt" "grep -v '^#'"
-    fetch_list "Firehol level2" "https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/firehol_level2.netset" "v4_firehol_l2.txt" "grep -v '^#'"
-    fetch_list "Firehol level3" "https://raw.githubusercontent.com/firehol/blocklist-ipsets/refs/heads/master/firehol_level3.netset" "v4_firehol_l3.txt" "grep -v '^#'"
-    fetch_list "myip.ms" "https://raw.githubusercontent.com/firehol/blocklist-ipsets/refs/heads/master/myip.ipset" "v4_myip.txt" "grep -v '^#'"
-    fetch_list "SOCKS proxies" "https://raw.githubusercontent.com/firehol/blocklist-ipsets/refs/heads/master/socks_proxy_7d.ipset" "v4_socks_proxy.txt" "grep -v '^#'"
-    fetch_list "Botvrij" "https://www.botvrij.eu/data/ioclist.ip-dst.raw" "v4_botvrij.txt" "grep -v '^#'"
-    fetch_list "StopForumSpam" "https://www.stopforumspam.com/downloads/toxic_ip_cidr.txt" "v4_stopforumspam.txt" "grep -v '^#'"
-    fetch_list "Shodan scanners" "https://gist.githubusercontent.com/jfqd/4ff7fa70950626a11832a4bc39451c1c/raw" "v4_shodan.txt" "grep -v '^#'"
+    # Fetching IPv4 Lists (continue on individual failures)
+    FETCH_TOTAL=$((FETCH_TOTAL + 1)); fetch_list "AbuseIPDB" "https://raw.githubusercontent.com/borestad/blocklist-abuseipdb/main/abuseipdb-s100-30d.ipv4" "v4_abuseipdb.txt" "grep -v '^#' | awk '{print \$1}'" && FETCH_SUCCESS_COUNT=$((FETCH_SUCCESS_COUNT + 1)) || true
+    FETCH_TOTAL=$((FETCH_TOTAL + 1)); fetch_list "IPsum" "https://raw.githubusercontent.com/stamparm/ipsum/master/levels/3.txt" "v4_ipsum.txt" "grep -v '^#'" && FETCH_SUCCESS_COUNT=$((FETCH_SUCCESS_COUNT + 1)) || true
+    FETCH_TOTAL=$((FETCH_TOTAL + 1)); fetch_list "Spamhaus DROP" "https://www.spamhaus.org/drop/drop.txt" "v4_drop.txt" "grep -v '^;' | awk '{print \$1}' | cut -d';' -f1" && FETCH_SUCCESS_COUNT=$((FETCH_SUCCESS_COUNT + 1)) || true
+    FETCH_TOTAL=$((FETCH_TOTAL + 1)); fetch_list "Emerging Threats" "https://rules.emergingthreats.net/blockrules/compromised-ips.txt" "v4_et.txt" "grep -v '^#'" && FETCH_SUCCESS_COUNT=$((FETCH_SUCCESS_COUNT + 1)) || true
+    FETCH_TOTAL=$((FETCH_TOTAL + 1)); fetch_list "Feodo Tracker" "https://feodotracker.abuse.ch/downloads/ipblocklist.txt" "v4_feodo.txt" "grep -v '^#'" && FETCH_SUCCESS_COUNT=$((FETCH_SUCCESS_COUNT + 1)) || true
+    FETCH_TOTAL=$((FETCH_TOTAL + 1)); fetch_list "URLhaus" "https://urlhaus.abuse.ch/downloads/text_online/" "v4_urlhaus.txt" "grep -oE '([0-9]{1,3}\\.){3}[0-9]{1,3}'" && FETCH_SUCCESS_COUNT=$((FETCH_SUCCESS_COUNT + 1)) || true
+    FETCH_TOTAL=$((FETCH_TOTAL + 1)); fetch_list "CI Army" "https://cinsscore.com/list/ci-badguys.txt" "v4_ci.txt" "grep -v '^#'" && FETCH_SUCCESS_COUNT=$((FETCH_SUCCESS_COUNT + 1)) || true
+    FETCH_TOTAL=$((FETCH_TOTAL + 1)); fetch_list "Binary Defense" "https://www.binarydefense.com/banlist.txt" "v4_binary.txt" "grep -v '^#'" && FETCH_SUCCESS_COUNT=$((FETCH_SUCCESS_COUNT + 1)) || true
+    FETCH_TOTAL=$((FETCH_TOTAL + 1)); fetch_list "Bruteforce Blocker" "https://danger.rulez.sk/projects/bruteforceblocker/blist.php" "v4_bruteforce.txt" "grep -v '^#'" && FETCH_SUCCESS_COUNT=$((FETCH_SUCCESS_COUNT + 1)) || true
+    FETCH_TOTAL=$((FETCH_TOTAL + 1)); fetch_list "Tor Exit Nodes" "https://check.torproject.org/torbulkexitlist" "v4_tor.txt" "grep -v '^#'" && FETCH_SUCCESS_COUNT=$((FETCH_SUCCESS_COUNT + 1)) || true
+    FETCH_TOTAL=$((FETCH_TOTAL + 1)); fetch_list "Blocklist.de" "https://lists.blocklist.de/lists/all.txt" "v4_blocklist_de.txt" "grep -v '^#'" && FETCH_SUCCESS_COUNT=$((FETCH_SUCCESS_COUNT + 1)) || true
+    FETCH_TOTAL=$((FETCH_TOTAL + 1)); fetch_list "Blocklist.de SSH" "https://lists.blocklist.de/lists/ssh.txt" "v4_blocklist_ssh.txt" "grep -v '^#'" && FETCH_SUCCESS_COUNT=$((FETCH_SUCCESS_COUNT + 1)) || true
+    FETCH_TOTAL=$((FETCH_TOTAL + 1)); fetch_list "Blocklist.de Apache" "https://lists.blocklist.de/lists/apache.txt" "v4_blocklist_apache.txt" "grep -v '^#'" && FETCH_SUCCESS_COUNT=$((FETCH_SUCCESS_COUNT + 1)) || true
+    FETCH_TOTAL=$((FETCH_TOTAL + 1)); fetch_list "Blocklist.de mail" "https://lists.blocklist.de/lists/mail.txt" "v4_blocklist_mail.txt" "grep -v '^#'" && FETCH_SUCCESS_COUNT=$((FETCH_SUCCESS_COUNT + 1)) || true
+    FETCH_TOTAL=$((FETCH_TOTAL + 1)); fetch_list "GreenSnow" "https://blocklist.greensnow.co/greensnow.txt" "v4_greensnow.txt" "grep -v '^#'" && FETCH_SUCCESS_COUNT=$((FETCH_SUCCESS_COUNT + 1)) || true
+    FETCH_TOTAL=$((FETCH_TOTAL + 1)); fetch_list "DShield" "https://feeds.dshield.org/block.txt" "v4_dshield.txt" "grep -v '^#' | awk '{print \$1 \"/\" \$3}'" && FETCH_SUCCESS_COUNT=$((FETCH_SUCCESS_COUNT + 1)) || true
+    FETCH_TOTAL=$((FETCH_TOTAL + 1)); fetch_list "Botscout" "https://raw.githubusercontent.com/firehol/blocklist-ipsets/refs/heads/master/botscout_7d.ipset" "v4_botscout.txt" "grep -v '^#'" && FETCH_SUCCESS_COUNT=$((FETCH_SUCCESS_COUNT + 1)) || true
+    FETCH_TOTAL=$((FETCH_TOTAL + 1)); fetch_list "Firehol level1" "https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/firehol_level1.netset" "v4_firehol_l1.txt" "grep -v '^#'" && FETCH_SUCCESS_COUNT=$((FETCH_SUCCESS_COUNT + 1)) || true
+    FETCH_TOTAL=$((FETCH_TOTAL + 1)); fetch_list "Firehol level2" "https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/firehol_level2.netset" "v4_firehol_l2.txt" "grep -v '^#'" && FETCH_SUCCESS_COUNT=$((FETCH_SUCCESS_COUNT + 1)) || true
+    FETCH_TOTAL=$((FETCH_TOTAL + 1)); fetch_list "Firehol level3" "https://raw.githubusercontent.com/firehol/blocklist-ipsets/refs/heads/master/firehol_level3.netset" "v4_firehol_l3.txt" "grep -v '^#'" && FETCH_SUCCESS_COUNT=$((FETCH_SUCCESS_COUNT + 1)) || true
+    FETCH_TOTAL=$((FETCH_TOTAL + 1)); fetch_list "myip.ms" "https://raw.githubusercontent.com/firehol/blocklist-ipsets/refs/heads/master/myip.ipset" "v4_myip.txt" "grep -v '^#'" && FETCH_SUCCESS_COUNT=$((FETCH_SUCCESS_COUNT + 1)) || true
+    FETCH_TOTAL=$((FETCH_TOTAL + 1)); fetch_list "SOCKS proxies" "https://raw.githubusercontent.com/firehol/blocklist-ipsets/refs/heads/master/socks_proxy_7d.ipset" "v4_socks_proxy.txt" "grep -v '^#'" && FETCH_SUCCESS_COUNT=$((FETCH_SUCCESS_COUNT + 1)) || true
+    FETCH_TOTAL=$((FETCH_TOTAL + 1)); fetch_list "Botvrij" "https://www.botvrij.eu/data/ioclist.ip-dst.raw" "v4_botvrij.txt" "grep -v '^#'" && FETCH_SUCCESS_COUNT=$((FETCH_SUCCESS_COUNT + 1)) || true
+    FETCH_TOTAL=$((FETCH_TOTAL + 1)); fetch_list "StopForumSpam" "https://www.stopforumspam.com/downloads/toxic_ip_cidr.txt" "v4_stopforumspam.txt" "grep -v '^#'" && FETCH_SUCCESS_COUNT=$((FETCH_SUCCESS_COUNT + 1)) || true
+    FETCH_TOTAL=$((FETCH_TOTAL + 1)); fetch_list "Shodan scanners" "https://gist.githubusercontent.com/jfqd/4ff7fa70950626a11832a4bc39451c1c/raw" "v4_shodan.txt" "grep -v '^#'" && FETCH_SUCCESS_COUNT=$((FETCH_SUCCESS_COUNT + 1)) || true
 
     # Fetching IPv6 Lists
-    fetch_list "Spamhaus DROPv6" "https://www.spamhaus.org/drop/dropv6.txt" "v6_drop.txt" "grep -v '^;' | awk '{print \$1}' | cut -d';' -f1"
+    FETCH_TOTAL=$((FETCH_TOTAL + 1)); fetch_list "Spamhaus DROPv6" "https://www.spamhaus.org/drop/dropv6.txt" "v6_drop.txt" "grep -v '^;' | awk '{print \$1}' | cut -d';' -f1" && FETCH_SUCCESS_COUNT=$((FETCH_SUCCESS_COUNT + 1)) || true
 
-    log "Validating IPs..."
+    log "Successfully fetched $FETCH_SUCCESS_COUNT/$FETCH_TOTAL lists"
+    
+    if [ "$FETCH_SUCCESS_COUNT" -eq 0 ]; then
+        error "All list downloads failed. Keeping existing rules."
+        exit 1
+    fi
 
-    # IPv4 Validation (Handles /CIDR)
-    cat v4_*.txt 2>/dev/null > raw_v4.txt || true
-    grep -oE "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]{1,2})?" raw_v4.txt | \
-    awk -F'.' '$1<=255 && $2<=255 && $3<=255 && $4<=255 { print $0 }' | \
-    grep -vE "^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|127\.|0\.|224\.|240\.|255\.)" \
-    > clean_v4.txt
+    log "Validating and cleaning IPs..."
 
-    # IPv6 Validation
-    cat v6_*.txt 2>/dev/null > raw_v6.txt || true
-    grep -iE "^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}(/[0-9]{1,3})?$" raw_v6.txt \
-    > clean_v6.txt
+    # IPv4 Processing with strict validation
+    cat v4_*.txt 2>/dev/null | validate_ipv4 > clean_v4.txt || touch clean_v4.txt
+    
+    # IPv6 Processing with strict validation
+    cat v6_*.txt 2>/dev/null | validate_ipv6 > clean_v6.txt || touch clean_v6.txt
+
+    V4_RAW=$(cat v4_*.txt 2>/dev/null | wc -l || echo 0)
+    V6_RAW=$(cat v6_*.txt 2>/dev/null | wc -l || echo 0)
+    V4_CLEAN=$(wc -l < clean_v4.txt)
+    V6_CLEAN=$(wc -l < clean_v6.txt)
+    
+    log "IPv4: $V4_RAW raw entries → $V4_CLEAN valid entries"
+    log "IPv6: $V6_RAW raw entries → $V6_CLEAN valid entries"
 
     # Whitelisting
     touch whitelist_patterns.txt
@@ -165,58 +276,83 @@ main() {
         echo "$pattern" >> whitelist_patterns.txt
     done
 
-    grep -v -F -f whitelist_patterns.txt clean_v4.txt > step1_v4.txt
-    grep -v -F -f whitelist_patterns.txt clean_v6.txt > step1_v6.txt
+    grep -v -F -f whitelist_patterns.txt clean_v4.txt > step1_v4.txt || touch step1_v4.txt
+    grep -v -F -f whitelist_patterns.txt clean_v6.txt > step1_v6.txt || touch step1_v6.txt
 
-    log "Optimizing Lists (merging overlaps)..."
+    log "Optimizing lists (merging overlapping CIDRs)..."
 
-    # Merge overlapping CIDRs using Python
-    cat step1_v4.txt | optimize_list > final_v4.txt
-    cat step1_v6.txt | optimize_list > final_v6.txt
+    # Optimize with error handling
+    cat step1_v4.txt | optimize_list "v4" > final_v4.txt 2>&1 || cp step1_v4.txt final_v4.txt
+    cat step1_v6.txt | optimize_list "v6" > final_v6.txt 2>&1 || cp step1_v6.txt final_v6.txt
+
+    # Safety Check
+    log "Performing safety check..."
+
+    MIN_IPS=500
+    TOTAL_IPS=$(( $(wc -l < final_v4.txt) + $(wc -l < final_v6.txt) ))
+    if [ "$TOTAL_IPS" -lt "$MIN_IPS" ]; then
+        error "Safety check failed: Only $TOTAL_IPS IPs found (minimum: $MIN_IPS)"
+        error "This indicates a problem with list downloads. Keeping existing rules."
+        exit 1
+    fi
 
     log "Generating NFTables configuration..."
 
-    V4_ELEMENTS=$(paste -sd "," final_v4.txt)
-    V6_ELEMENTS=$(paste -sd "," final_v6.txt)
+    if [ ! -s final_v4.txt ] && [ ! -s final_v6.txt ]; then
+        error "No valid IPs to import. Exiting."
+        exit 1
+    fi
+
+    V4_ELEMENTS=$(paste -sd "," final_v4.txt || echo "")
+    V6_ELEMENTS=$(paste -sd "," final_v6.txt || echo "")
 
     NFT_FILE="apply_blocklist.nft"
 
     cat <<EOF > "$NFT_FILE"
 table inet $NFT_TABLE {
+EOF
+
+    if [ -s final_v4.txt ]; then
+        cat <<EOF >> "$NFT_FILE"
     set v4_list {
         type ipv4_addr
         flags interval
         auto-merge
         elements = { $V4_ELEMENTS }
     }
+EOF
+    fi
 
+    if [ -s final_v6.txt ]; then
+        cat <<EOF >> "$NFT_FILE"
     set v6_list {
         type ipv6_addr
         flags interval
         auto-merge
         elements = { $V6_ELEMENTS }
     }
+EOF
+    fi
 
+    cat <<EOF >> "$NFT_FILE"
     chain inbound {
         type filter hook input priority -100; policy accept;
-        ip saddr @v4_list drop
-        ip6 saddr @v6_list drop
+EOF
+
+    if [ -s final_v4.txt ]; then
+        echo "        ip saddr @v4_list drop" >> "$NFT_FILE"
+    fi
+    
+    if [ -s final_v6.txt ]; then
+        echo "        ip6 saddr @v6_list drop" >> "$NFT_FILE"
+    fi
+
+    cat <<EOF >> "$NFT_FILE"
     }
 }
 EOF
 
-    # Safety Check
-    log "Performing safety check on total IPs..."
-
-    MIN_IPS=500
-    TOTAL_IPS=$(( $(wc -l < final_v4.txt) + $(wc -l < final_v6.txt) ))
-    if [ "$TOTAL_IPS" -lt "$MIN_IPS" ]; then
-        error "Safety Brake: Only found $TOTAL_IPS IPs (Threshold: $MIN_IPS)."
-        error "Something went wrong with downloads. Keeping old rules active."
-        exit 1
-    fi
-
-    # Apply to Kernel
+    # Apply to NFTables
     log "Applying rules to NFTables..."
 
     if nft list table inet "$NFT_TABLE" >/dev/null 2>&1; then
@@ -226,9 +362,9 @@ EOF
     if nft -f "$NFT_FILE"; then
         V4_COUNT=$(wc -l < final_v4.txt)
         V6_COUNT=$(wc -l < final_v6.txt)
-        log "Success. Blocked $V4_COUNT IPv4 and $V6_COUNT IPv6 addresses."
+        log "✓ Success! Blocked $V4_COUNT IPv4 and $V6_COUNT IPv6 networks"
     else
-        error "Failed to apply NFTables rules. Check syntax."
+        error "Failed to apply NFTables rules. Check syntax in $TEMP_DIR/$NFT_FILE"
         exit 1
     fi
 }
