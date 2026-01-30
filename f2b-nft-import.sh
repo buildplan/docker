@@ -122,7 +122,7 @@ main() {
     fetch_list "Botscout" "https://raw.githubusercontent.com/firehol/blocklist-ipsets/refs/heads/master/botscout_7d.ipset" "v4_botscout.txt" "grep -v '^#'"
     fetch_list "Firehol" "https://raw.githubusercontent.com/firehol/blocklist-ipsets/refs/heads/master/firehol_level3.netset" "v4_firehol.txt" "grep -v '^#'"
     fetch_list "myip.ms" "https://raw.githubusercontent.com/firehol/blocklist-ipsets/refs/heads/master/myip.ipset" "v4_myip.txt" "grep -v '^#'"
-    fetch_list "SOCKS proxies" "https://raw.githubusercontent.com/firehol/blocklist-ipsets/refs/heads/master/socks_proxy_7d.ipset" "v4_socks_proxy.txt" "grep ->
+    fetch_list "SOCKS proxies" "https://raw.githubusercontent.com/firehol/blocklist-ipsets/refs/heads/master/socks_proxy_7d.ipset" "v4_socks_proxy.txt" "grep -v '^#'"
 
     # Fetching IPv6 Lists
     fetch_list "Spamhaus DROPv6" "https://www.spamhaus.org/drop/dropv6.txt" "v6_drop.txt" "grep -v '^;' | awk '{print \$1}' | cut -d';' -f1"
