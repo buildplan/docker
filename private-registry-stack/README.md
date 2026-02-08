@@ -796,6 +796,16 @@ docker compose exec regsync ping docker.io
 docker compose exec redis redis-cli info
 ```
 
+**`regsync` with debug to troubleshoot any errors**
+
+```bash
+# This performs a DRY RUN with detailed logs
+docker compose run --rm regsync -c /config/regsync.yml --verbosity debug check
+
+# This actually SYNCS images
+docker compose run --rm regsync -c /config/regsync.yml --verbosity debug once
+```
+
 ---
 
 ## Disaster Recovery
@@ -898,5 +908,5 @@ Regular maintenance following the procedures outlined in this documentation will
 
 ---
 
-*Documentation last updated: August 22, 2025*  
+*Documentation last updated: Feb 08, 2026*  
 *Based on: Docker Registry v3, Debian 13, Docker Compose*
