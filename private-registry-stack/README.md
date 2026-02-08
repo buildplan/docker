@@ -804,6 +804,9 @@ docker compose run --rm regsync -c /config/regsync.yml --verbosity debug check
 
 # This actually SYNCS images
 docker compose run --rm regsync -c /config/regsync.yml --verbosity debug once
+
+# To redirect log into a file
+docker compose run --rm regsync -c /config/regsync.yml --verbosity debug once 2>&1 | tee -a debug_log.txt
 ```
 
 ---
