@@ -17,10 +17,9 @@ The runner must be registered with the server to generate a `.runner` credential
 
 **Critical Flags:**
 
-- `--user 0:0` and `-w /data`: Fixes the "Permission Denied" error.
-- `--no-interactive`: Prevents the command from hanging/crashing.
-- Get the runner registration toke from you main forgejo server - *settings > Actions > Runners > Create new runner*
-- Update `FORGEJO_REGISTRATION_TOKEN` and `remote-vps-name` in the command below
+* `--user 0:0` and `-w /data`: Forces the container to run as root so it has permission to write the `.runner` file to your host volume.
+* `--no-interactive`: Mandatory for running registration inside a non-tty Docker container.
+* **Token:** Get this from your Forgejo instance: *Site Admin > Actions > Runners > Create new runner*.
 
 ```bash
 sudo docker run --rm --user 0:0 \
@@ -29,15 +28,14 @@ sudo docker run --rm --user 0:0 \
   code.forgejo.org/forgejo/runner:12.6.4 \
   forgejo-runner register \
   --no-interactive \
-  --instance https://git.alisufyan.cloud \
-  --token FORGEJO_REGISTRATION_TOKEN \
+  --instance https://git.domain.tld \
+  --token YOUR_REGISTRATION_TOKEN \
   --name remote-vps-name \
   --labels "ubuntu-latest:docker://ghcr.io/catthehacker/ubuntu:act-24.04,docker:docker://node:20-bullseye"
 ```
 
-**Fix Permissions:**
-
-The command above creates a `.runner` file owned by root. Change it back to your user so the docker-compose service can read it:
+**Fix Ownership:**
+The command above creates a `.runner` file owned by `root`. Change it back to your user so the runner service can manage it:
 
 ```bash
 sudo chown -R $USER:$USER $(pwd)/runner/data
@@ -45,18 +43,25 @@ sudo chown -R $USER:$USER $(pwd)/runner/data
 
 ## 3. Configuration & Deployment
 
-Create your `docker-compose.yml` and `config.yml`.
+### Step A: Identify GIDs
 
-### docker-compose.yml
+On the **new VPS**, find your User ID and the Docker Group ID. These are often different on every provider.
+
+```bash
+id          # Look for uid (e.g., 1002)
+getent group docker | cut -d: -f3  # Look for docker gid (e.g., 988)
+```
+
+### Step B: docker-compose.yml
 
 ```yaml
 services:
   forgejo-runner:
     image: code.forgejo.org/forgejo/runner:12
     container_name: forgejo-runner
-    user: 1002:1002 # check with 'id' on the system and change
+    user: 1002:1002 # Use the IDs found in Step A
     group_add:
-      - "988" # 'id' should show docker group id as well
+      - "988"       # Use the Docker GID found in Step A
     expose:
       - "8686"
     environment:
@@ -74,124 +79,95 @@ services:
       options: { max-size: "5m", max-file: "3" }
 ```
 
-### config.yml (Key Changes)
+### Step C: config.yml
 
-Ensure the `container: network` is set to `bridge` since the remote VPS doesn't have access to the server's internal Docker network.
+Ensure `network: bridge` is set. Remote runners cannot use internal Docker networks of the Forgejo server.
 
 ```yaml
 log:
   level: info
   job_level: info
- 
+
 runner:
   file: .runner
   capacity: 2
-  envs:
-    A_TEST_ENV_NAME_1: a_test_env_value_1
-    A_TEST_ENV_NAME_2: a_test_env_value_2
-  env_file: .env
-  timeout: 3h
-  shutdown_timeout: 3h
-  insecure: false
-  fetch_timeout: 5s
-  fetch_interval: 2s
-  report_interval: 1s
   labels:
-    - "ubuntu-latest-2:docker://docker.gitea.com/runner-images:ubuntu-latest"
+    - "ubuntu-latest-2:docker://ghcr.io/catthehacker/ubuntu:act-24.04"
     - "ubuntu-latest:docker://ghcr.io/catthehacker/ubuntu:act-24.04"
-    - "ubuntu-22.04-2:docker://ghcr.io/catthehacker/ubuntu:act-22.04"
-    - "ubuntu-full-2:docker://ghcr.io/catthehacker/ubuntu:full-24.04"
-    - "ubuntu-latest-2-js:docker://ghcr.io/catthehacker/ubuntu:js-latest"
-    - "debian-bookworm-2:docker://debian:bookworm"
-    - "debian-trixie-slim-2:docker://debian:trixie-slim"
-    - "alpine-3.20-2:docker://alpine:3.20"
-    - "minimal-node-2:docker://node:24-slim"
     - "shellcheck-2:docker://koalaman/shellcheck-alpine:stable"
- 
+
 cache:
   enabled: true
   port: 8686
   dir: "/data/cache"
-  secret: "l2kEV9YgppCB3ANIw15kHDXVapz9AB2zKztbbaLnVipztB2GS73U6RDB4ZYrqoKy" # some random long string
+  secret: "long-random-string-here"
   host: "forgejo-runner"
-  proxy_port: 0
- 
+
 container:
   network: bridge  # Crucial for remote systems
-  network: bridge
   enable_ipv6: false
   privileged: false
-  options: "--group-add 988" # Check 'getent group docker' on the new VPS
+  options: "--group-add 988" # Must match the GID in docker-compose.yml
   workdir_parent:
   valid_volumes: ["**"]
   docker_host: "automount"
 ```
 
-* * *
+---
 
-## 4. Security & Networking (The "Hidden" Requirements)
+## 4. Security & Networking
 
-If your runner is "Idle" but jobs keep failing with connection timeouts, check these three areas:
+### A. Reverse Proxy Timeouts
 
-### A. Reverse Proxy (Nginx/Traefik)
-
-If Forgejo is behind a reverse proxy, the proxy must allow long-lived connections (WebSockets/Long Polling).
-
-- Ensure your proxy doesn't have a very short timeout (e.g., 60s).
-- The runner makes a "long-poll" request to the server; if the proxy cuts it off, the runner will cycle constantly.
-    
+If Forgejo is behind Nginx/Traefik, ensure proxy timeouts are high (e.g., 300s). Short timeouts will cause the runner to disconnect constantly during long-polling.
 
 ### B. CrowdSec / Fail2Ban Whitelisting
 
-Because the runner makes thousands of requests per day to `git.domain.com`, your security tools might flag it as a "DDoS" or "Bot."
+The runner hits your server API frequently. **Whitelist the Runner IP** on the Forgejo Server:
 
-**On your Forgejo Server/Proxy VPS:**
+**CrowdSec:**
 
-- **CrowdSec:** Add the Remote Runner's IP to the whitelist.
-    
-    ```bash
-    # Edit /etc/crowdsec/parsers/s02-enrich/whitelists.yaml
-    name: forgejo-whitelist
-    description: "Whitelist remote runners"
-    whitelist:
-      reason: "remote forgejo runner"
-      ip:
-        - "RUNNER_VPS_IP"
-    ```
-    
-- **Fail2Ban:** Add the IP to the `ignoreip` list in `jail.local`.
-    
-    ```toml
-    [DEFAULT]
-    ignoreip = 127.0.0.1/8 ::1 RUNNER_VPS_IP
-    ```
-    
+Add to `/etc/crowdsec/parsers/s02-enrich/whitelists.yaml`:
 
-### C. Firewall (UFW/Iptables)
+```yaml
+name: runner-whitelist
+description: "Forgejo Remote Runner"
+whitelist:
+  reason: "internal runner"
+  ip: ["RUNNER_VPS_IP"]
+```
 
-The Remote Runner only needs **OUTBOUND** access to the server on Port 443.
+**Fail2Ban:**
 
-However, the **Forgejo Server** must allow that specific IP. If you have strict UFW rules:
+Add to `[DEFAULT]` in `jail.local`:
+
+```ini
+ignoreip = 127.0.0.1/8 ::1 RUNNER_VPS_IP
+```
+
+### C. Firewall (UFW)
 
 ```bash
 sudo ufw allow from RUNNER_VPS_IP to any port 443 proto tcp
 ```
 
-* * *
+---
 
-## 5. ARM64 vs x86_64 Awareness
+## 5. Architecture (ARM64 vs x86)
 
-- **Renovate:** Works natively on both.
-    
-- **Docker Builds:** Use `docker/setup-qemu-action@v3` and `docker/setup-buildx-action@v3` in your workflows to ensure that when an ARM runner builds an image, it includes the `amd64` version (and vice versa).
-    
+* **Renovate:** Works natively on ARM64; no changes needed.
+* **Docker Builds:** Use `docker/setup-qemu-action@v3` in workflows to ensure ARM64 runners can build `amd64` images (and vice versa).
 
-## 6. Maintenance
+## 6. Maintenance & Validation
 
-Every few months, clean up the runner VPS to prevent disk bloat from old Docker build layers:
+**Start the runner:**
 
 ```bash
-docker system prune -f
+docker compose up -d
 ```
 
-**Final Check:** Once deployed, go to **Site Admin > Actions > Runners**. If the dot is **Green (Idle)**, the handshake is complete and the runner is ready for jobs.
+**Verify Connection:**
+
+1. Check Logs: `docker compose logs -f`
+2. Check Forgejo UI: **Site Admin > Actions > Runners**. Look for a **Green (Idle)** status for your new runner name.
+3. Prune old build layers monthly: `docker system prune -f`
