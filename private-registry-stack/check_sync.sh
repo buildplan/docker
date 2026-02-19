@@ -3,89 +3,12 @@
 # ==============================================================================
 # Name: check_sync.sh
 # Description: A bash script to check for and sync Docker images using
-#              regsync. It is designed to be run periodically (e.g., via a
-#              cron job). The script is rate-limit aware for Docker Hub,
-#              includes retry logic for transient errors, and provides detailed
-#              logging and notifications via ntfy.
+#              regsync across multiple configuration files. Rate-limit aware,
+#              includes retry logic, detailed ntfy alerts, and rich payload
+#              reporting to Healthchecks.io.
 #
 # buildplan.org
-# 10-11-2025
-# ==============================================================================
-
-# --- PURPOSE ---
-# This script automates the process of keeping a local Docker registry mirror
-# up-to-date with upstream public registries. It prevents unnecessary runs,
-# avoids failures due to Docker Hub's rate limits, and provides clear
-# success/failure notifications.
-
-# --- PREREQUISITES ---
-# 1. `docker` and `docker compose` must be installed and running.
-# 2. `curl` is required for sending ntfy notifications and checking rate limits.
-# 3. `jq` is required to parse the JSON response for the Docker Hub auth token.
-# 4. A `docker-compose.yml` file with a configured `regsync` service.
-# 5. A ntfy token file located at `secrets/ntfy_token` within the PROJECT_DIR.
-
-# --- CONFIGURATION ---
-# All user-configurable variables are located in the "Configuration" section
-# at the top of the script. Key variables include:
-# - PROJECT_DIR: The root directory of your registry project.
-# - MIN_INTERVAL_HOURS: The minimum time between script runs. Set to 0 to disable.
-# - NTFY_URL/TOPIC/TOKEN: Settings for ntfy push notifications.
-# - CRITICAL_THRESHOLD: If Docker Hub pulls are below this, the script will abort.
-# - WARNING_THRESHOLD: If pulls are below this, a warning is logged.
-# - MAX_RETRIES: How many times to retry a failed regsync command.
-# - RETRY_DELAY: How many seconds to wait between retries.
-
-# --- USAGE ---
-# 1. Standard Execution (respects the time interval):
-#    ./check_sync.sh
-# 2. Force Execution (bypasses the time interval check):
-#    ./check_sync.sh --force
-# 3. Manual Rate-Limit Check (only checks the limit and exits):
-#    ./check_sync.sh --hub-limit
-
-# --- WORKFLOW ---
-# 1.  Parses command-line arguments (e.g., --force).
-# 2.  Checks if the minimum time interval has passed since the last run. If not,
-#     it exits unless the --force flag is used.
-# 3.  Performs a pre-check of the Docker Hub API rate limit. If the remaining
-#     pulls are below the CRITICAL_THRESHOLD, it aborts the run.
-# 4.  Runs `regsync check` with retry logic.
-# 5.  If the check command fails after all retries, it sends a failure
-#     notification and exits.
-# 6.  If the check output indicates that images need syncing, it proceeds to run
-#     `regsync once` with the same retry logic.
-# 7.  Sends a final notification indicating success, failure, or that all
-#     images were already up-to-date.
-# 8.  Performs a final rate-limit check to log the status after the run.
-# 9.  All output is printed to the console and appended to the log file specified
-#     by SCRIPT_LOG_FILE.
-#
-# --- FUNCTIONS ---
-#
-# log(), warn(), error(), success()
-#   - Helper functions for color-coded and formatted log output.
-#
-# send_ntfy(title, message, priority, tags)
-#   - Sends a push notification to the configured ntfy topic.
-#
-# get_auth_token()
-#   - Fetches a temporary authentication token from Docker Hub required for
-#     querying the rate-limit API.
-#
-# check_rate_limit()
-#   - Makes an API call to Docker Hub to get the current rate-limit status
-#     (limit, remaining, reset time) and compares it against the thresholds.
-#
-# run_regsync_with_retry(mode)
-#   - A robust wrapper that executes a regsync command ('check' or 'once').
-#   - It captures all output and intelligently retries the command if it fails,
-#     with a longer delay for rate-limit specific errors.
-#
-# main()
-#   - The primary function that orchestrates the entire script workflow from
-#     start to finish.
-#
+# 10-11-2025 - v4
 # ==============================================================================
 
 # ==============================================================================
@@ -101,7 +24,6 @@ STATE_FILE="${LOG_DIR}/.check_sync_state"
 NTFY_URL=$(<"${SECRETS_DIR}/ntfy_url")
 NTFY_TOPIC=$(<"${SECRETS_DIR}/ntfy_topic")
 NTFY_TOKEN_FILE="${SECRETS_DIR}/ntfy_token"
-
 HC_URL_FILE="${SECRETS_DIR}/cs_hc_url"
 HC_URL=""
 if [[ -f "${HC_URL_FILE}" ]]; then
@@ -115,13 +37,16 @@ DOCKER_HUB_REGISTRY="registry-1.docker.io"
 RATE_CHECK_IMAGE="ratelimitpreview/test"
 
 MAX_RETRIES=3
-RETRY_DELAY=300
+RETRY_DELAY=600
 MIN_INTERVAL_HOURS=6
 
 CRITICAL_THRESHOLD=75
 WARNING_THRESHOLD=175
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; CYAN='\033[0;36m'; NC='\033[0m'
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; GRAY='\033[0;90m'; NC='\033[0m'
+
+# Global variable to track the script's status for Healthchecks payload
+HC_MESSAGE="Script aborted unexpectedly."
 
 # ==============================================================================
 # Logging & Notification
@@ -131,39 +56,42 @@ warn()   { echo -e "$(date '+%Y-%m-%d %H:%M:%S') ${YELLOW}[WARN]${NC} $*" >&2; }
 error()  { echo -e "$(date '+%Y-%m-%d %H:%M:%S') ${RED}[ERROR]${NC} $*" >&2; }
 success(){ echo -e "$(date '+%Y-%m-%d %H:%M:%S') ${GREEN}[SUCCESS]${NC} $*" >&2; }
 
+# Helper to cleanly exit and pass the reason to the Healthchecks trap
+fatal() {
+  HC_MESSAGE="$1"
+  error "${HC_MESSAGE}"
+  exit 1
+}
+
 send_ntfy() {
   local title="$1" message="$2" priority="$3" tags="$4"
   local auth_header=()
-  if [[ -f "${NTFY_TOKEN_FILE}" ]]; then
-    local token
-    token=$(<"${NTFY_TOKEN_FILE}")
-    [[ -n "$token" ]] && auth_header=(-H "Authorization: Bearer ${token}")
-  fi
-  curl -sf --connect-timeout 5 --max-time 10 \
-    "${auth_header[@]}" \
+  [[ -f "${NTFY_TOKEN_FILE}" ]] && auth_header=(-H "Authorization: Bearer $(<"${NTFY_TOKEN_FILE}")")
+  curl -sf --connect-timeout 5 --max-time 10 "${auth_header[@]}" \
     -H "Title: ${title}" -H "Priority: ${priority}" -H "Tags: ${tags}" \
-    -d "${message}" \
-    "${NTFY_URL}/${NTFY_TOPIC}" &
+    -d "${message}" "${NTFY_URL}/${NTFY_TOPIC}" &
 }
 
 ping_healthcheck() {
-    local endpoint="$1"
     [[ -z "${HC_URL}" ]] && return 0
-    if ! curl -fsS -m 10 --retry 3 "${HC_URL}${endpoint}" > /dev/null 2>&1; then
-        warn "Failed to ping Healthchecks.io endpoint: ${endpoint}"
-        return 1
-    fi
-    return 0
-}
-# shellcheck disable=SC2329
-cleanup_and_report() {
-    local final_exit_code=$?
-    [[ -z "${HC_URL}" ]] && return
-    if [[ $final_exit_code -eq 0 ]]; then
-        ping_healthcheck ""
+    local endpoint="$1"
+    local message="$2"
+
+    # If a message is provided, POST it as raw data. Otherwise, standard ping.
+    if [[ -n "$message" ]]; then
+        curl -fsS -m 10 --retry 3 -X POST --data-raw "${message}" "${HC_URL}${endpoint}" > /dev/null 2>&1 || warn "Healthcheck POST failed: ${endpoint}"
     else
-        ping_healthcheck "/${final_exit_code}"
+        curl -fsS -m 10 --retry 3 "${HC_URL}${endpoint}" > /dev/null 2>&1 || warn "Healthcheck GET failed: ${endpoint}"
     fi
+}
+
+cleanup_and_report() {
+    local code=$?
+    [[ -z "${HC_URL}" ]] && return
+
+    # Send the explicit exit code alongside our captured status message
+    local payload="Exit Code: ${code}\nStatus: ${HC_MESSAGE}"
+    ping_healthcheck "/${code}" "${payload}"
 }
 
 # ==============================================================================
@@ -219,6 +147,9 @@ check_rate_limit() {
     return 0
   fi
 
+  # Log the exact status to Healthchecks.io Events tab without changing job status
+  ping_healthcheck "/log" "Docker Hub Rate Limit: ${remaining}/${limit} pulls remaining on ${HOSTNAME}."
+
   log "Rate limit: ${remaining}/${limit} remaining"
   if (( remaining < CRITICAL_THRESHOLD )); then
     error "Critical threshold reached (${remaining} < ${CRITICAL_THRESHOLD})"
@@ -232,9 +163,6 @@ check_rate_limit() {
   fi
 }
 
-# ==============================================================================
-# Manual Rate-Limit Check (for --hub-limit)
-# ==============================================================================
 run_manual_check() {
   docker_hub_login &>/dev/null || true
   local token headers limit remaining used usage user_info user
@@ -264,12 +192,13 @@ run_manual_check() {
   usage=$((used * 100 / limit))
 
   echo "----------------------------------------"
-  echo "Docker Hub Rate Limit Status"
+  echo "Docker Hub Rate Limit Status (Current 6hr Window)"
   echo "----------------------------------------"
   echo -e "Account:      ${GREEN}${user_info}${NC}"
-  echo -e "Limit:        ${GREEN}${limit}${NC} pulls per 6 hours"
-  echo -e "Remaining:    ${GREEN}${remaining}${NC}"
-  echo -e "Used:         ${YELLOW}${used}${NC} (${usage}%)"
+  echo -e "Window Limit: ${GREEN}${limit}${NC} manifest pulls per 6 hours"
+  echo -e "Remaining:    ${GREEN}${remaining}${NC} (resets every 6 hours)"
+  echo -e "Used:         ${YELLOW}${used}${NC} (${usage}% of current window)"
+  echo -e "${GRAY}Note: Version checks (HEAD requests) do not count${NC}"
   echo "----------------------------------------"
   exit 0
 }
@@ -277,34 +206,45 @@ run_manual_check() {
 # ==============================================================================
 # Regsync Wrapper with Retry
 # ==============================================================================
-REGSYNC_OUTPUT=""
-run_regsync_with_retry() {
-  local mode=$1
-  REGSYNC_OUTPUT=""
+run_regsync_for_file() {
+  local mode="$1"
+  local config_file="$2"
+  local config_basename
+  config_basename=$(basename "$config_file")
+
+  # Path inside the container
+  local container_path="/config/${config_basename}"
+  local cmd_out rc=0
+
   for attempt in $(seq 1 "${MAX_RETRIES}"); do
-    log "Running regsync '${mode}' (attempt ${attempt}/${MAX_RETRIES})..."
-    local cmd_out rc=0
-    cmd_out=$(docker compose -f "${COMPOSE_FILE}" run --rm -T regsync -c /config/regsync.yml "${mode}" 2>&1) || rc=$?
-    REGSYNC_OUTPUT="$cmd_out"
-    if [[ $rc -eq 0 ]]; then
-      success "Regsync '${mode}' completed successfully."
+    log "Running regsync '${mode}' on ${config_basename} (attempt ${attempt})..."
+
+    # Capture output and exit code
+    cmd_out=$(docker compose -f "${COMPOSE_FILE}" run --rm -T regsync -c "${container_path}" "${mode}" 2>&1) || rc=$?
+
+    if [[ $rc -eq 0 ]] || [[ "$mode" == "check" && $rc -eq 1 ]]; then
+      success "Success: ${config_basename} (RC=${rc})"
+      echo "$cmd_out" # Output result for main loop to capture
       return 0
     fi
-    error "Regsync '${mode}' failed on attempt ${attempt} with exit code ${rc}."
+
+    # Failure handling
+    error "Failed: ${config_basename} (attempt ${attempt} - RC=${rc})"
+
+    # Check for rate limits
     if grep -qiE 'too.*many.*requests|rate.*limit|429' <<<"$cmd_out"; then
-      warn "Rate-limit error detected."
-      if (( attempt < MAX_RETRIES )); then
-        log "Waiting for ${RETRY_DELAY}s before retrying..."
-        sleep "${RETRY_DELAY}"
-        continue
-      fi
+      warn "Rate limit detected. Waiting ${RETRY_DELAY}s..."
+      sleep "${RETRY_DELAY}"
     else
-      error "Non-retryable error detected. Failing fast."
-      echo -e "${RED}--- Begin Regsync Error Output ---\n${REGSYNC_OUTPUT}\n--- End Regsync Error Output ---${NC}" >&2
+      # If it's a config error (not a rate limit), fail immediately
+      error "Non-retryable error. Failing file."
+      echo "$cmd_out"
       return 1
     fi
   done
-  error "Regsync '${mode}' has failed after all ${MAX_RETRIES} attempts."
+
+  # If we exhausted retries
+  echo "$cmd_out"
   return 1
 }
 
@@ -316,20 +256,21 @@ main() {
 
   # Set up exit trap for Healthchecks.io reporting
   trap cleanup_and_report EXIT
-  ping_healthcheck "/start"
+
+  # Send start ping with diagnostic body
+  ping_healthcheck "/start" "Regsync execution started on ${HOSTNAME}."
 
   # Config validation
-  [[ -r "${COMPOSE_FILE}" ]] || { error "Missing compose file: ${COMPOSE_FILE}"; exit 1; }
-  [[ -r "${PROJECT_DIR}/regsync.yml" ]] || { error "Missing regsync.yml"; exit 1; }
+  [[ -r "${COMPOSE_FILE}" ]] || fatal "Missing compose file: ${COMPOSE_FILE}"
+  compgen -G "${PROJECT_DIR}/regsync*.yml" > /dev/null || fatal "No regsync*.yml files found"
   [[ -r "${NTFY_TOKEN_FILE}" ]] || warn "Missing ntfy token; notifications may fail"
 
   # Prerequisites
   for cmd in docker curl jq date; do
-    command -v "$cmd" &>/dev/null || { error "Required command not found: $cmd"; exit 1; }
+    command -v "$cmd" &>/dev/null || fatal "Required command not found: $cmd"
   done
   if ! docker compose version &>/dev/null; then
-    error "Required command 'docker compose' not found. Please ensure Docker Compose v2 is installed."
-    exit 1
+    fatal "Required command 'docker compose' not found. Please ensure Docker Compose v2 is installed."
   fi
 
   # Force & interval
@@ -341,7 +282,8 @@ main() {
       last=$(<"${STATE_FILE}") now=$(date +%s)
       delta=$((now - last))
       if (( delta < MIN_INTERVAL_HOURS * 3600 )); then
-        log "Skipping: last run $((delta/60)) minutes ago"
+        HC_MESSAGE="Skipped: Last run was $((delta/60)) minutes ago."
+        log "$HC_MESSAGE"
         exit 0
       fi
     fi
@@ -349,46 +291,67 @@ main() {
 
   log "===== Starting Regsync on ${HOSTNAME} ====="
 
-  # Pre-check rate limit
+  # Pre-check rate limit and abort if critical
   local status=0
   check_rate_limit || status=$?
   if [[ $status -eq 2 ]]; then
     send_ntfy "[Regsync] ABORTED" "Critical rate-limit on ${HOSTNAME}" high stop_sign
-    exit 1
+    fatal "Critical rate-limit reached (${CRITICAL_THRESHOLD}). Aborting run."
   fi
 
   send_ntfy "[Regsync] START" "Beginning sync on ${HOSTNAME}" default hourglass
 
-  # Regsync check
-  if ! run_regsync_with_retry check; then
-    send_ntfy "[Regsync] CHECK FAILED" "Regsync check failed on ${HOSTNAME}" high x
-    exit 1
-  fi
-  echo "${REGSYNC_OUTPUT}"
+  local overall_success=true
 
-  # Sync if needed
-  if grep -q "Image sync needed" <<<"${REGSYNC_OUTPUT}"; then
-    if run_regsync_with_retry once; then
-      local summary
-      summary=$(grep 'sync needed' <<<"${REGSYNC_OUTPUT}" | sed 's/.*: //')
-      send_ntfy "[Regsync] SYNC SUCCESS" "Updated: ${summary}" high tada
-    else
-      send_ntfy "[Regsync] SYNC FAILED" "Sync failed on ${HOSTNAME}" high x
-      exit 1
+  # Loop through all regsync*.yml files
+  for config_path in "${PROJECT_DIR}"/regsync*.yml; do
+    [[ -e "$config_path" ]] || continue
+
+    local config_basename
+    config_basename=$(basename "$config_path")
+    log "Processing: ${config_basename}"
+
+    # 1. Run Check and capture output
+    local check_output
+    if ! check_output=$(run_regsync_for_file "check" "$config_path"); then
+        # Print the error output to log
+        echo "$check_output"
+        send_ntfy "[Regsync] CHECK FAILED" "Failed config: ${config_basename}" high x
+        overall_success=false
+        continue
     fi
-  else
-    send_ntfy "[Regsync] UP-TO-DATE" "All images up to date on ${HOSTNAME}" default white_check_mark
+
+    # Print success output to log
+    echo "$check_output"
+
+    # 2. Run Sync if needed
+    if grep -q "Image sync needed" <<<"$check_output"; then
+       local sync_output
+       if sync_output=$(run_regsync_for_file "once" "$config_path"); then
+          echo "$sync_output"
+          local summary
+          summary=$(grep 'sync needed' <<<"$check_output" | sed 's/.*: //' | tr '\n' ', ')
+          send_ntfy "[Regsync] SYNC SUCCESS" "Synced in ${config_basename}: ${summary}" high tada
+       else
+          echo "$sync_output"
+          send_ntfy "[Regsync] SYNC FAILED" "Failed sync: ${config_basename}" high x
+          overall_success=false
+       fi
+    else
+       log "No sync needed for ${config_basename}"
+    fi
+  done
+
+  if [[ "$overall_success" == "false" ]]; then
+      fatal "One or more configurations failed during sync."
   fi
 
-  # Final rate-limit log
+  send_ntfy "[Regsync] COMPLETE" "All configs up-to-date on ${HOSTNAME}" default white_check_mark
   check_rate_limit || true
-
-  # On success, update state
-  log "Run complete—updating state timestamp"
   date +%s >"${STATE_FILE}"
 
-  log "===== Regsync Completed Successfully ====="
-  exit 0
+  HC_MESSAGE="All configurations processed and synced successfully."
+  log "===== Regsync Completed ====="
 }
 
 # ==============================================================================
@@ -413,7 +376,7 @@ case "${1:-}" in
     ;;
   ""|--force)
     main "$@" 2>&1 | tee -a "${SCRIPT_LOG_FILE}"
-    # Exit with 'main'’s exit code, not tee’s
+    # Exit with main exit code
     exit "${PIPESTATUS[0]}"
     ;;
   *)
