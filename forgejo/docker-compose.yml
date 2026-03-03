@@ -5,7 +5,7 @@ networks:
 services:
   # --- forgejo server ---
   forgejo-server:
-    image: codeberg.org/forgejo/forgejo:${SERVER_VER:-12}
+    image: codeberg.org/forgejo/forgejo:${SERVER_VER:-14}
     container_name: forgejo-server
     environment:
       - USER_UID=1001
@@ -30,28 +30,47 @@ services:
     ports:
       - "127.0.0.1:3009:3000"
       - "100.115.52.19:3009:3000"
-      - "172.22.11.5:3009:3000"
       - "555:22"
     depends_on:
       forgejo-db:
         condition: service_healthy
     logging:
-      driver: "json-file"
-      options: { max-size: "5m", max-file: "3" }
+      driver: "journald"
+      options: { tag: "forgejo-ssh" }
+    # logging:
+      # driver: "json-file"
+      # options: { max-size: "5m", max-file: "3" }
+    healthcheck:
+      test: |
+        HEALTH_RESPONSE=$$(/usr/bin/curl --insecure --silent --fail-with-body $${FORGEJO__server__PROTOCOL:-http}://localhost:$${FORGEJO__server__HTTP_PORT:-3000}/api/healthz) && \
+        { echo "$$HEALTH_RESPONSE" | /bin/grep "\"status\": \?\"pass\"" &>/dev/null && \
+          ! echo "$$HEALTH_RESPONSE" | /bin/grep "\"status\": \?\"fail\"" &>/dev/null && \
+          ! echo "$$HEALTH_RESPONSE" | /bin/grep "\"status\": \?\"warn\"" &>/dev/null; } || \
+        { HEALTH_RESPONSE=$$(echo "$$HEALTH_RESPONSE" | tr "\n" " "); \
+          OUTPUT_FD="2"; \
+          [ "$${HEALTHCHECK_LOG_ERROR+x}" = "x" ] && OUTPUT_FD="/proc/1/fd/2"; \
+          echo >&$$OUTPUT_FD "Healthcheck failed: $$HEALTH_RESPONSE"; \
+          exit 1; }
+      start_period: 1m
+      start_interval: 5s
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   # --- forgejo DB ---
   forgejo-db:
-    image: postgres:${DB_VER:-17-alpine}
+    image: postgres:${DB_VER:-18-alpine}
     container_name: forgejo-db
     restart: unless-stopped
     environment:
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=${POSTGRES_DB}
+      - PGDATA=/var/lib/postgresql/data
     networks:
       - forgejo
     volumes:
-      - ./forgejo-db:/var/lib/postgresql/data
+      - ./forgejo-db/18/docker:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
@@ -61,22 +80,28 @@ services:
       driver: "json-file"
       options: { max-size: "5m", max-file: "3" }
 
-  # --- forgejo ruuner ---
+  # --- ruuner ---
   forgejo-runner:
-    image: code.forgejo.org/forgejo/runner:${RUNNER_VER:-10}
+    image: code.forgejo.org/forgejo/runner:${RUNNER_VER:-12}
     depends_on:
       forgejo-server:
-        condition: service_started
+        condition: service_healthy
     container_name: forgejo-runner
     networks:
       - forgejo
     user: 1001:1001
     group_add:
-      - 994  # GID of the 'docker' group on the host
+      - 994
+    expose:
+      - 8686
+    environment:
+      - DOCKER_CONFIG=/runner_creds
     volumes:
       - ./runner/data:/data
+      - ./runner/cache:/data/cache
       - ./runner/data/config.yml:/data/config.yml:ro
-      - /var/run/docker.sock:/var/run/docker.sock # Used by runner - avoiding Docker network issues with docker-indocker 
+      - /home/admin/.docker:/runner_creds:ro # change to correct user
+      - /var/run/docker.sock:/var/run/docker.sock
     restart: 'unless-stopped'
     # command: '/bin/sh -c "while : ; do sleep 1 ; done ;"'   # used for registering the runner with server
     command: '/bin/sh -c "sleep 5; forgejo-runner daemon --config /data/config.yml"'
