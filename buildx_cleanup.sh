@@ -18,8 +18,8 @@ mkdir -p "$LOG_DIR"
   docker ps -a --filter "name=buildx_buildkit_" --format "{{.ID}}|{{.Names}}" | \
   while IFS="|" read -r id name; do
 
-    created_epoch=$(docker inspect -f '{{.Created}}' "$id" 2>/dev/null \
-      | xargs -r date -d +%s 2>/dev/null)
+    raw_date=$(docker inspect -f '{{.Created}}' "$id" 2>/dev/null)
+    created_epoch=$(date -d "$raw_date" +%s 2>/dev/null)
 
     if [[ -z "$created_epoch" ]]; then
       echo "  Skipping $name: could not determine creation time"
@@ -43,11 +43,11 @@ mkdir -p "$LOG_DIR"
       fi
 
       if [[ -n "$builder_name" ]]; then
-        echo "    Removing registered builder: $builder_name"
-        docker buildx rm "$builder_name" || docker rm -f "$id" || true
+        echo "    Registered builder found: $builder_name. removing..."
+        docker buildx rm "$builder_name" || docker rm -f "$id"
       else
-        echo "    Orphan — force removing container: $id"
-        docker rm -f "$id" || true
+        echo "    Orphan detected (no buildx registration). Force removing container: $id"
+        docker rm -f "$id"
       fi
     fi
   done
