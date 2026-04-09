@@ -50,7 +50,6 @@ mkdir -p "$LOG_DIR"
   # 2/3. Prune builder cache
   echo "Pruning remaining builder cache..."
   docker builder prune -f 2>&1 | tail -1
-  docker builder prune -f
 
   # 3/3. Clean up dangling volumes
   echo "Removing dangling buildx volumes..."
