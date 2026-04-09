@@ -29,6 +29,16 @@ mkdir -p "$LOG_DIR"
     age_seconds=$(( $(date +%s) - created_epoch ))
 
     if (( age_seconds > MAX_AGE_SECONDS )); then
+      status=$(docker inspect -f '{{.State.Status}}' "$id" 2>/dev/null)
+      if [[ "$status" == "running" ]]; then
+        active_sessions=$(docker exec "$id" buildctl debug sessions 2>/dev/null \
+          | grep -v "^ID" | grep -c ".")
+
+        if [[ "$active_sessions" -gt 0 ]]; then
+          echo "  Skipping $name — build in progress ($active_sessions active session(s))"
+          continue
+        fi
+      fi
       echo "  Stale: $name ($((age_seconds / 3600))h old)"
 
       candidate=$(echo "$name" | sed 's/^buildx_buildkit_//')
@@ -43,11 +53,11 @@ mkdir -p "$LOG_DIR"
       fi
 
       if [[ -n "$builder_name" ]]; then
-        echo "    Registered builder found: $builder_name. removing..."
-        docker buildx rm "$builder_name" || docker rm -f "$id"
+        echo "    Removing registered builder: $builder_name"
+        docker buildx rm "$builder_name" || docker rm -f "$id" || true
       else
-        echo "    Orphan detected (no buildx registration). Force removing container: $id"
-        docker rm -f "$id"
+        echo "    Orphan detected — force removing container: $id"
+        docker rm -f "$id" || true
       fi
     fi
   done
