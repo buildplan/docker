@@ -11,7 +11,6 @@ mkdir -p "$LOG_DIR"
 {
   echo "=== $(date '+%Y-%m-%d %H:%M:%S') - Starting buildx cleanup ==="
 
-  # Get disk usage before cleanup
   echo "Disk usage before: $(df -h / | awk 'NR==2 {print $3 "/" $2}')"
 
   # 1/3. Iterate through builders and kill old instances
@@ -55,7 +54,6 @@ mkdir -p "$LOG_DIR"
   echo "Removing dangling buildx volumes..."
   docker volume ls --filter name=buildx_buildkit --filter dangling=true -q | xargs -r docker volume rm -f
 
-  # Disk usage after cleanup
   echo "Disk usage after: $(df -h / | awk 'NR==2 {print $3 "/" $2}')"
   echo "=== Done ==="
 } >> "$LOG" 2>&1
