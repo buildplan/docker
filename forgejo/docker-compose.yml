@@ -20,6 +20,8 @@ services:
       - FORGEJO__server__SSH_DOMAIN=${FORGEJO_SSH_DOMAIN}
       - FORGEJO__server__SSH_PORT=555
       - FORGEJO__server__SSH_LISTEN_PORT=22
+      - FORGEJO__openid__ENABLE_OPENID_SIGNIN=false
+      - FORGEJO__openid__ENABLE_OPENID_SIGNUP=false
     restart: unless-stopped
     networks:
       - forgejo
