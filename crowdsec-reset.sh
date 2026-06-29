@@ -11,11 +11,34 @@ log() {
 # --- Config ---
 log "=== CrowdSec Maintenance Configuration ==="
 
-printf "Enter CrowdSec container name [crowdsec]: "
-read -r ans
-CONTAINER_NAME="${ans:-crowdsec}"
+# --- DETECT MODE ---
+MODE="unknown"
+if command -v cscli >/dev/null 2>&1 && [ -d "/etc/crowdsec" ]; then
+    MODE="native"
+elif command -v docker >/dev/null 2>&1; then
+    MODE="docker"
+else
+    log "Error: Could not detect CrowdSec (neither native 'cscli' nor Docker found)."
+    exit 1
+fi
 
-printf "Enter DB path (host path if native, container path if docker) [/var/lib/crowdsec/data/crowdsec.db]: "
+if [ "$MODE" = "docker" ]; then
+    printf "Enter CrowdSec container name [crowdsec]: "
+    read -r ans
+    CONTAINER_NAME="${ans:-crowdsec}"
+
+    # Check if container is running early
+    if ! docker ps -q -f name="^${CONTAINER_NAME}$" >/dev/null 2>&1; then
+        log "Error: Container '$CONTAINER_NAME' is not running."
+        exit 1
+    fi
+fi
+
+if [ "$MODE" = "native" ]; then
+    printf "Enter DB path [/var/lib/crowdsec/data/crowdsec.db]: "
+else
+    printf "Enter DB path inside container [/var/lib/crowdsec/data/crowdsec.db]: "
+fi
 read -r ans
 DB_PATH="${ans:-/var/lib/crowdsec/data/crowdsec.db}"
 
@@ -40,26 +63,17 @@ read -r ans
 PROXY_CONTAINERS="${ans:-traefik}"
 
 echo ""
-# --- DETECT MODE ---
-MODE="unknown"
-if command -v cscli >/dev/null 2>&1 && [ -d "/etc/crowdsec" ]; then
-    MODE="native"
-    log "=== Starting DB Maintenance & Purge ==="
+log "=== Starting DB Maintenance & Purge ==="
+if [ "$MODE" = "native" ]; then
     log "Mode:             Native (Host)"
-
     # Prerequisite check for native mode
     if ! command -v sqlite3 >/dev/null 2>&1; then
         log "Error: 'sqlite3' is not installed on this host."
         log "Please install it (e.g., 'sudo apt install sqlite3') to vacuum natively."
         exit 1
     fi
-elif command -v docker >/dev/null 2>&1 && docker ps -q -f name="^${CONTAINER_NAME}$" >/dev/null 2>&1; then
-    MODE="docker"
-    log "=== Starting DB Maintenance & Purge ==="
-    log "Mode:             Docker (Container: $CONTAINER_NAME)"
 else
-    log "Error: Could not detect CrowdSec (neither native 'cscli' nor Docker container '$CONTAINER_NAME' found)."
-    exit 1
+    log "Mode:             Docker (Container: $CONTAINER_NAME)"
 fi
 
 log "DB Path:          $DB_PATH"
@@ -70,14 +84,34 @@ log "Host Bouncers:    $HOST_BOUNCER_SVCS"
 log "Proxy Containers: $PROXY_CONTAINERS"
 log "======================================="
 
-# Get current database size
-if [ "$MODE" = "native" ]; then
-    SIZE_BYTES=$(wc -c < "$DB_PATH" 2>/dev/null || echo "0")
-else
-    SIZE_BYTES=$(docker exec "$CONTAINER_NAME" sh -c "wc -c < \"$DB_PATH\"" 2>/dev/null || echo "0")
-fi
+get_db_size() {
+    if [ "$MODE" = "native" ]; then
+        sum_size=0
+        for f in "$DB_PATH" "$DB_PATH-wal" "$DB_PATH-shm"; do
+            if [ -f "$f" ]; then
+                s=$(wc -c < "$f" 2>/dev/null || echo "0")
+                sum_size=$((sum_size + s))
+            fi
+        done
+        echo "$sum_size"
+    else
+        docker exec "$CONTAINER_NAME" sh -c "
+            sum_size=0
+            for f in \"$DB_PATH\" \"$DB_PATH-wal\" \"$DB_PATH-shm\"; do
+                if [ -f \"\$f\" ]; then
+                    s=\$(wc -c < \"\$f\" 2>/dev/null || echo \"0\")
+                    sum_size=\$((sum_size + s))
+                fi
+            done
+            echo \"\$sum_size\"
+        " 2>/dev/null || echo "0"
+    fi
+}
 
-if [ "$SIZE_BYTES" -eq 0 ]; then
+# Get current database size
+SIZE_BYTES=$(get_db_size)
+
+if [ -z "$SIZE_BYTES" ] || [ "$SIZE_BYTES" -eq 0 ]; then
     log "Error: Could not read database file size at $DB_PATH. Does it exist?"
     exit 1
 fi
@@ -169,11 +203,7 @@ else
 fi
 
 # Verify
-if [ "$MODE" = "native" ]; then
-    NEW_SIZE_BYTES=$(wc -c < "$DB_PATH" 2>/dev/null || echo "0")
-else
-    NEW_SIZE_BYTES=$(docker exec "$CONTAINER_NAME" sh -c "wc -c < \"$DB_PATH\"" 2>/dev/null || echo "0")
-fi
+NEW_SIZE_BYTES=$(get_db_size)
 NEW_SIZE_MB=$((NEW_SIZE_BYTES / 1024 / 1024))
 
 log "======================================="
