@@ -15,7 +15,7 @@ printf "Enter CrowdSec container name [crowdsec]: "
 read -r ans
 CONTAINER_NAME="${ans:-crowdsec}"
 
-printf "Enter DB path inside container [/var/lib/crowdsec/data/crowdsec.db]: "
+printf "Enter DB path (host path if native, container path if docker) [/var/lib/crowdsec/data/crowdsec.db]: "
 read -r ans
 DB_PATH="${ans:-/var/lib/crowdsec/data/crowdsec.db}"
 
@@ -40,8 +40,28 @@ read -r ans
 PROXY_CONTAINERS="${ans:-traefik}"
 
 echo ""
-log "=== Starting DB Maintenance & Purge ==="
-log "Container:        $CONTAINER_NAME"
+# --- DETECT MODE ---
+MODE="unknown"
+if command -v cscli >/dev/null 2>&1 && [ -d "/etc/crowdsec" ]; then
+    MODE="native"
+    log "=== Starting DB Maintenance & Purge ==="
+    log "Mode:             Native (Host)"
+
+    # Prerequisite check for native mode
+    if ! command -v sqlite3 >/dev/null 2>&1; then
+        log "Error: 'sqlite3' is not installed on this host."
+        log "Please install it (e.g., 'sudo apt install sqlite3') to vacuum natively."
+        exit 1
+    fi
+elif command -v docker >/dev/null 2>&1 && docker ps -q -f name="^${CONTAINER_NAME}$" >/dev/null 2>&1; then
+    MODE="docker"
+    log "=== Starting DB Maintenance & Purge ==="
+    log "Mode:             Docker (Container: $CONTAINER_NAME)"
+else
+    log "Error: Could not detect CrowdSec (neither native 'cscli' nor Docker container '$CONTAINER_NAME' found)."
+    exit 1
+fi
+
 log "DB Path:          $DB_PATH"
 log "Threshold (MB):   $SIZE_THRESHOLD_MB"
 log "Max Age:          $MAX_AGE"
@@ -50,14 +70,12 @@ log "Host Bouncers:    $HOST_BOUNCER_SVCS"
 log "Proxy Containers: $PROXY_CONTAINERS"
 log "======================================="
 
-# Check if container is running
-if ! docker ps -q -f name="^${CONTAINER_NAME}$" >/dev/null 2>&1; then
-    log "Error: Container '$CONTAINER_NAME' is not running."
-    exit 1
-fi
-
 # Get current database size
-SIZE_BYTES=$(docker exec "$CONTAINER_NAME" sh -c "wc -c < \"$DB_PATH\"" 2>/dev/null || echo "0")
+if [ "$MODE" = "native" ]; then
+    SIZE_BYTES=$(wc -c < "$DB_PATH" 2>/dev/null || echo "0")
+else
+    SIZE_BYTES=$(docker exec "$CONTAINER_NAME" sh -c "wc -c < \"$DB_PATH\"" 2>/dev/null || echo "0")
+fi
 
 if [ "$SIZE_BYTES" -eq 0 ]; then
     log "Error: Could not read database file size at $DB_PATH. Does it exist?"
@@ -70,31 +88,57 @@ log "Starting cleanup process..."
 
 # Purge the custom blocklists
 log "[1/6] Purging decisions (Origin: $IMPORT_ORIGIN)..."
-if ! docker exec "$CONTAINER_NAME" cscli decisions delete --origin "$IMPORT_ORIGIN"; then
-    log "Notice: Purge returned non-zero (DB locked or empty). Continuing..."
+if [ "$MODE" = "native" ]; then
+    if ! cscli decisions delete --origin "$IMPORT_ORIGIN"; then
+        log "Notice: Purge returned non-zero (DB locked or empty). Continuing..."
+    fi
+else
+    if ! docker exec "$CONTAINER_NAME" cscli decisions delete --origin "$IMPORT_ORIGIN"; then
+        log "Notice: Purge returned non-zero (DB locked or empty). Continuing..."
+    fi
 fi
 sleep 3
 
 # Flush old alerts
 log "[2/6] Flushing alerts older than $MAX_AGE..."
-if ! docker exec "$CONTAINER_NAME" cscli alerts flush --max-age "$MAX_AGE"; then
-    log "Notice: Alert flush returned non-zero. Continuing..."
+if [ "$MODE" = "native" ]; then
+    if ! cscli alerts flush --max-age "$MAX_AGE"; then
+        log "Notice: Alert flush returned non-zero. Continuing..."
+    fi
+else
+    if ! docker exec "$CONTAINER_NAME" cscli alerts flush --max-age "$MAX_AGE"; then
+        log "Notice: Alert flush returned non-zero. Continuing..."
+    fi
 fi
 sleep 3
 
 # Stop CrowdSec
-log "[3/6] Stopping '$CONTAINER_NAME' container (Releasing SQLite locks)..."
-docker stop "$CONTAINER_NAME" >/dev/null
+if [ "$MODE" = "native" ]; then
+    log "[3/6] Stopping CrowdSec service (Releasing SQLite locks)..."
+    sudo systemctl stop crowdsec
+else
+    log "[3/6] Stopping '$CONTAINER_NAME' container (Releasing SQLite locks)..."
+    docker stop "$CONTAINER_NAME" >/dev/null
+fi
 sleep 10
 
 # Vacuum and Optimize
 log "[4/6] Vacuuming and optimizing database (this may take a minute)..."
-docker run --rm --volumes-from "$CONTAINER_NAME" alpine sh -c \
-  "apk add --no-cache sqlite && sqlite3 \"$DB_PATH\" 'VACUUM; PRAGMA optimize;'"
+if [ "$MODE" = "native" ]; then
+    sqlite3 "$DB_PATH" 'VACUUM; PRAGMA optimize;'
+else
+    docker run --rm --volumes-from "$CONTAINER_NAME" alpine sh -c \
+      "apk add --no-cache sqlite && sqlite3 \"$DB_PATH\" 'VACUUM; PRAGMA optimize;'"
+fi
 
 # Start CrowdSec
-log "[5/6] Starting '$CONTAINER_NAME' container..."
-docker start "$CONTAINER_NAME" >/dev/null
+if [ "$MODE" = "native" ]; then
+    log "[5/6] Starting CrowdSec service..."
+    sudo systemctl start crowdsec
+else
+    log "[5/6] Starting '$CONTAINER_NAME' container..."
+    docker start "$CONTAINER_NAME" >/dev/null
+fi
 sleep 10
 
 # Restart Bouncers & Proxies to clear metrics/cache
@@ -125,7 +169,11 @@ else
 fi
 
 # Verify
-NEW_SIZE_BYTES=$(docker exec "$CONTAINER_NAME" sh -c "wc -c < \"$DB_PATH\"" 2>/dev/null || echo "0")
+if [ "$MODE" = "native" ]; then
+    NEW_SIZE_BYTES=$(wc -c < "$DB_PATH" 2>/dev/null || echo "0")
+else
+    NEW_SIZE_BYTES=$(docker exec "$CONTAINER_NAME" sh -c "wc -c < \"$DB_PATH\"" 2>/dev/null || echo "0")
+fi
 NEW_SIZE_MB=$((NEW_SIZE_BYTES / 1024 / 1024))
 
 log "======================================="
